@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121a24">
+  <meta name="description" content="Digitalboo — trợ lý Daily Standup và Outlook.">
+  <title>Digitalboo — Trợ lý công việc</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app"></div>
+  <input type="file" id="file-input" accept=".txt,.md,.csv,.json,.pdf,.docx,text/*" multiple hidden>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <noscript>Bật JavaScript để chạy bản demo Digitalboo.</noscript>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>
