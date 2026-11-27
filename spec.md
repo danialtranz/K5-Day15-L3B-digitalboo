@@ -47,15 +47,28 @@ Hai lớp tách nhau (eval không phụ thuộc harness):
 
 - **Lát cắt MỘT CÂU (sản phẩm):** User chat muốn điền standup → agent trích slot từ prompt → thiếu thì **HITL interrupt** hỏi bổ sung → đủ thì Playwright **điền + Submit** trên URL standup đã grant/allowlist (user **tự login** trên cửa sổ browser).
 - **Intent (LLM, không keyword):** `conversation` | `standup_fill` | `email_watch`
-- **Slot standup bắt buộc:** `yesterday`, `today`, `url` · optional: `schedule_at` (Redis delayed job; không có = chạy ngay, `force=True`)
+- **Slot standup bắt buộc:** `yesterday`, `today`, `url` · optional: `schedule_at` (đưa vào hàng đợi Redis; không có = chạy ngay, `force=True`)
 - **HITL** (kiểu LangGraph checkpointer, bảng `hitl_checkpoints`): thiếu slot → `interrupted` → tin nhắn sau cùng `session_id` merge bằng LLM → đủ thì chạy tiếp. **HITL = bổ sung thông tin thiếu, không phải duyệt nội dung draft trước Submit.**
 - **CU standup:** grant URL ∈ `STANDUP_ALLOWLIST_URL` → mở browser persistent → user login → `fill_and_submit` (chỉ host allowlist)
+- **Cron / scheduler** (`harness/jobs/scheduler.py`, lệnh `python -m harness scheduler`; cấu hình `harness/config/schedule.yaml`):
+  1. **Vòng lặp nền** (mặc định sleep 5s): pop Redis delayed jobs đến hạn → chạy `standup_fill` hoặc `email_watch`
+  2. **Job hẹn giờ từ chat:** user đưa `schedule_at` (vd `08:30`) → `schedule_job` vào Redis → cron worker gọi CU standup lúc đến giờ
+  3. **Email lặp:** `email_watch` + `notify_interval_sec` + `repeat` → sau mỗi lần chạy, schedule lại job tiếp theo; thêm quét email nền theo `email_watch.interval_sec` (mặc định 300s)
+  4. **Cửa sổ standup:** `standup.window_start/end` = 00:01–09:00 (TZ `Asia/Ho_Chi_Minh`); ngoài cửa sổ cần `force` hoặc đợi job đã schedule
+  5. Lock Redis (`lock:sched:delayed`, `lock:sched:email`) tránh chạy trùng
+- **Long-term memory** (Postgres, theo `session_id` / `user_id` — sống qua nhiều request, không chỉ trong 1 lần gọi LLM):
+  1. **Chat history:** bảng `chat_history` + `sessions` — mỗi `POST /ask` ghi user + assistant (`append_chat`); đọc lại tối đa ~40 tin gần nhất (`list_chat`)
+  2. **Đưa vào LLM:** `harness/memory.py` → `format_chat_history` (cắt `max_chars≈8000`) + `with_history` gắn vào detect intent, extract/merge slot, conversation
+  3. **HITL state bền:** `hitl_checkpoints` lưu slot đang thiếu theo session; tin sau resume vẫn thấy ngữ cảnh lịch sử
+  4. **Trạng thái lâu dài khác:** `standup_grants` (URL đã grant), `email_accounts` / `mail_seen` (OAuth + đã đọc mail), `notifications`
+  5. API xem lại: `GET /auth/chat/history?session_id=…`
 - **Không làm (≥3):** (1) CU website khác ngoài standup allowlist (2) Bịa `yesterday`/`today` khi user chưa cung cấp (3) Outlook OAuth (để sau) (4) Bỏ qua HITL khi còn thiếu slot bắt buộc
 - **Sơ đồ sản phẩm:**
 
 ```mermaid
 flowchart LR
-  inputUser[Input_user] --> intentLLM[Detect_intent_LLM]
+  inputUser[Input_user] --> memLoad[Load_chat_history_Postgres]
+  memLoad --> intentLLM[Detect_intent_LLM]
   intentLLM -->|conversation| chat[Tra_loi_thuong]
   intentLLM -->|email_watch| emailFlow[Email_HITL_roi_watch]
   intentLLM -->|standup_fill| slots[Extract_slots]
@@ -64,18 +77,25 @@ flowchart LR
   hitl --> resume[Merge_tin_sau]
   resume --> miss
   miss -->|du| maybeSched{Co_schedule_at?}
-  maybeSched -->|co| redis[Len_lich_Redis]
+  maybeSched -->|co| redis[Redis_delayed_job]
   maybeSched -->|khong| cu[Playwright_dien_Submit]
-  redis --> cu
+  redis --> cron[Scheduler_cron_loop]
+  cron --> cu
+  cron --> emailBg[Email_watch_dinh_ky]
+  chat --> memSave[Save_chat_history]
+  cu --> memSave
+  emailFlow --> memSave
 ```
 
-- **Hình dạng:** [x] agent chọn intent + workflow cố định theo intent — HITL checkpointer + CU / email tool.
+- **Hình dạng:** [x] agent chọn intent + workflow cố định theo intent — HITL checkpointer + CU / email + cron + **long-term memory** (Postgres chat/session).
 - **AI / công cụ sản phẩm:**
 
   | Công cụ / bước | Input | Output | Tác động ra ngoài? |
   |---|---|---|---|
+  | long-term memory (`chat_history` / `sessions`) | session_id, user_id | lịch sử chat inject prompt; persist sau mỗi turn | Không (ghi DB nội bộ) |
   | detect_intent + extract/merge slots | text, session history | intent, yesterday/today/url/… | Không |
   | HITL checkpoint | missing_fields | hỏi user, state `interrupted` | Không (chờ người) |
+  | Redis `schedule_job` + cron scheduler | `schedule_at` / interval | chạy standup/email đúng giờ | Gián tiếp — khi đến hạn thì CU / đọc mail |
   | grant + Playwright fill_and_submit | url allowlist, fields | điền form + Submit | **Có** — sửa form standup web |
   | Gmail OAuth + email_watch | grant / skip_grant | notify mail quan trọng | Có (đọc mail đã grant) |
 
@@ -118,12 +138,12 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 > Harness sản phẩm: S10-kiểu “điền standup trên URL allowlist sau HITL” là **hành vi đúng** của `standup_fill`; S12 (CU web khác) vẫn **từ chối**.
 
 ## §6. Bốn đường đi của trải nghiệm
-- Suôn sẻ (sản phẩm): prompt đủ `yesterday`+`today`+`url` → CU điền + Submit (user đã login) · hoặc có `schedule_at` → Redis rồi CU
-- Không chắc / thiếu slot: HITL hỏi bổ sung → resume cùng `session_id`
+- Suôn sẻ (sản phẩm): prompt đủ `yesterday`+`today`+`url` → CU điền + Submit (user đã login) · hoặc có `schedule_at` → Redis delayed job → **cron scheduler** chạy CU đúng giờ
+- Không chắc / thiếu slot: HITL hỏi bổ sung → resume cùng `session_id` (memory + checkpoint còn trong Postgres)
 - Không căn cứ: không bịa slot; thiếu thì interrupt
-- User sửa: gửi tin HITL cập nhật slot trước khi chạy
+- User sửa: gửi tin HITL cập nhật slot trước khi chạy; turn sau vẫn nhớ nhờ `chat_history`
 - Ngoài phạm vi: CU host ≠ allowlist; bịa việc; (eval) nộp hộ không qua harness
-- Đặc thù: cửa sổ 00:01–9h + CN; Discord không đủ; email_watch song song (OAuth / skip grant)
+- Đặc thù: cửa sổ 00:01–9h + CN; Discord không đủ; email_watch định kỳ qua cron; **long-term memory** theo session (Postgres)
 
 ## §7. Đánh giá & chuẩn "đạt" *(guide 2.4)* — CHỐT CP2
 - Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — **12** câu (thuong **4** · kho **5** · tu_choi **3**) · metric: `eval/metric_spec.yaml` (**4** metric)
@@ -149,3 +169,5 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 | 2026-11-27 CP2 | Chốt lát cắt notes→draft; §7 = 60% + 100% tu_choi; roadmap CU chỉ standup | Pain P1 + giảm rủi ro điểm |
 | 2026-11-27 | Thêm `harness/`: FastAPI, Docker Postgres+Redis (port non-default localhost), Gmail OAuth, CU standup grant/submit; CP2 không đổi | Roadmap sản phẩm thật tách eval |
 | 2026-11-27 | Cập nhật §2–§6, §9: sản phẩm = HITL slot + CU điền/Submit standup (khớp `harness/`); giữ §7 + eval draft | Spec khớp code đang viết |
+| 2026-11-27 | Ghi rõ cron scheduler: Redis delayed jobs + email nền + cửa sổ standup (`schedule.yaml`) | Cơ chế đã có trong `harness/jobs/scheduler.py` |
+| 2026-11-27 | Ghi long-term memory: Postgres `chat_history`/`sessions` + inject LLM (`harness/memory.py`) | Khớp `/ask` + orchestrator |
