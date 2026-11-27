@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "seed": 20261127,
+    "note": "Ghi chu gia lap de chay thu — khong phai bang chung pain"
+  },
+  "u1": {
+    "user_id": "u1",
+    "updated_at": "2026-11-27T22:30:00+07:00",
+    "notes": "Hom qua: fix bug login timeout, review PR cua An. Hom nay: viet API standup draft, hop sync 10h. Vuong: cho key staging."
+  },
+  "u2": {
+    "user_id": "u2",
+    "updated_at": "2026-11-27T21:00:00+07:00",
+    "notes": "Hom qua chi doc tai lieu, chua code. Hom nay se bat dau scaffold Electron."
+  },
+  "u_empty": {
+    "user_id": "u_empty",
+    "updated_at": null,
+    "notes": ""
+  },
+  "u_partial": {
+    "user_id": "u_partial",
+    "updated_at": "2026-11-27T23:00:00+07:00",
+    "notes": "Hom qua lam gi do lien quan frontend."
+  }
+}

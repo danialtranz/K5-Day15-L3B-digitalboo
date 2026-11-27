@@ -1,29 +1,99 @@
-"""Luồng chính của bản chạy thử — NHÓM VIẾT. Điền ở guide bước 3.2.
+"""Luồng chính — workflow: policy + notes → draft standup hoặc hỏi lại / từ chối."""
+import re
 
-`python run.py`, `python run.py eval` và `python run.py simulate` đều gọi answer(text).
-
-Hợp đồng:
-    answer(text: str) -> dict có khoá "output" (str): kết quả đưa cho người dùng.
-    Token, tên model, số lần gọi model / công cụ: khung tự đếm qua call_model và @tool — không cần trả.
-    Bộ chạy gửi NGUYÊN ô input của câu thử vào text. Dữ liệu nền (bài học, thông báo, lịch…)
-    do luồng của nhóm tự đọc qua công cụ trong tools.py.
-
-Hình dạng: đúng như sơ đồ ở spec.md §4 (guide bước 2.2) — workflow cố định, một agent, hay nhiều agent.
-Khung dưới đây là một workflow 2 bước VÍ DỤ, chỉ để luồng chạy hết từ trước CP2. Thay bằng luồng của nhóm.
-Nếu viết vòng lặp agent (AI tự chọn bước tiếp): đặt giới hạn MAX_STEPS và ghi lý do dừng bằng note("dừng: …").
-"""
 from ai import call_model
-from tools import search_example
-from tracing import note  # noqa: F401
+from tools import get_standup_policy, get_user_notes
+from tracing import note
 
-SYSTEM = ""     # NHÓM VIẾT: hướng dẫn hệ thống cho model (vai trò, phạm vi, khi nào nói "không có")
-MAX_STEPS = 5   # dùng khi viết vòng lặp agent
+SYSTEM = (
+    "Ban soan BAN NHAP daily standup tu ghi chu user. "
+    "Chi dung thong tin trong ghi chu; khong bia viec. "
+    "Output tieng Viet: cac o Hom qua / Hom nay / Vuong mac. "
+    "Ket thuc bang dong: Ban nhap — vui long duyet truoc khi nop. "
+    "Khong bao gio noi da nop form."
+)
+
+REFUSE_PATTERNS = [
+    r"nop\s*ho",
+    r"nộp\s*hộ",
+    r"tu\s*nop",
+    r"tự\s*nộp",
+    r"submit\s*(ho|hộ|giup|giúp)",
+    r"computer\s*use",
+    r"login\s*(ho|hộ|giup|giúp)",
+    r"bia\s*(giup|giúp|ho|hộ)",
+    r"bịa",
+    r"facebook",
+    r"web\s*khac",
+    r"website\s*khác",
+]
+
+
+def _parse_user_id(text: str) -> str:
+    m = re.search(r"user_id\s*[:=]\s*([A-Za-z0-9_]+)", text, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(u1|u2|u_empty|u_partial)\b", text)
+    return m.group(1) if m else "u1"
+
+
+def _is_refuse(text: str) -> bool:
+    low = text.lower()
+    return any(re.search(p, low) for p in REFUSE_PATTERNS)
+
+
+def _notes_enough(notes: str) -> bool:
+    if not notes or len(notes) < 20:
+        return False
+    # Can co it nhat goi y hom qua / hom nay
+    low = notes.lower()
+    has_y = any(k in low for k in ("hom qua", "hôm qua", "yesterday"))
+    has_t = any(k in low for k in ("hom nay", "hôm nay", "today"))
+    return has_y and has_t
 
 
 def answer(text: str) -> dict:
-    # Bước 1 (ví dụ): lấy căn cứ từ dữ liệu / công cụ của bài toán
-    found = search_example(text)
-    context = "\n".join("[%s] %s" % (p["code"], p["text"]) for p in found)
-    # Bước 2 (ví dụ): model quyết định dựa trên căn cứ
-    reply = call_model(SYSTEM, "Căn cứ:\n%s\n\nĐầu vào của người dùng:\n%s" % (context, text))
-    return {"output": reply["text"]}
+    text = text or ""
+    policy = get_standup_policy()
+    window = "%s–%s" % (policy.get("window_start"), policy.get("window_end"))
+
+    if _is_refuse(text):
+        note("tu_choi: yeu cau ngoai pham vi / tan cong")
+        return {
+            "output": (
+                "Tu choi. Lat cat hien tai chi soan BAN NHAP standup tu ghi chu de ban duyet; "
+                "khong tu Submit web, khong computer-use web khac, khong bia noi dung viec. "
+                "Hay de ghi chu (hom qua / hom nay) roi yeu cau soan draft trong cua so %s."
+                % window
+            )
+        }
+
+    user_id = _parse_user_id(text)
+    notes_row = get_user_notes(user_id)
+    notes = notes_row.get("notes") or ""
+
+    if not notes_row.get("found") or not _notes_enough(notes):
+        note("thieu_ghi_chu: hoi lai")
+        return {
+            "output": (
+                "Chua du ghi chu de soan standup (can ro 'hom qua' va 'hom nay'). "
+                "Ban hay bo sung ghi chu cho user_id=%s roi goi lai. "
+                "Toi se khong bia viec da lam. "
+                "Nhac: cua so nop standup la %s (ke ca CN)."
+                % (user_id, window)
+            )
+        }
+
+    note("soan_draft_tu_ghi_chu")
+    fields = ", ".join(f["label"] for f in policy.get("fields", []))
+    prompt = (
+        "Policy cua so: %s\nFields: %s\nUser: %s\nGhi chu:\n%s\n\n"
+        "Yeu cau nguoi dung:\n%s\n\n"
+        "Hay soan ban nhap standup. Khong bia ngoai ghi chu."
+        % (window, fields, user_id, notes, text)
+    )
+    reply = call_model(SYSTEM, prompt)
+    body = reply.get("text") or ""
+    if "duyet" not in body.lower() and "duyệt" not in body.lower():
+        body = body.rstrip() + "\n\nBan nhap — vui long duyet truoc khi nop."
+    return {"output": body}

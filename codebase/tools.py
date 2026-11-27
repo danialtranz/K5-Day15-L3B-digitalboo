@@ -1,18 +1,38 @@
-"""Công cụ của bài toán — NHÓM VIẾT. Điền ở guide bước 2.2 (thiết kế) và 3.2 (code).
+"""Công cụ của bài toán — digitalboo · daily standup từ ghi chú."""
+import json
+import os
 
-Mỗi công cụ là một hàm Python có @tool. Docstring ghi đúng 4 ý như sơ đồ ở spec.md §4:
-    tên · input · output · có tác động ra ngoài không (gửi tin, sửa dữ liệu, chấm điểm…)
-Khung tự ghi mỗi lần gọi công cụ vào trace (tên, input, output rút gọn, thời gian, lỗi).
+from tracing import tool, TOOLS  # noqa: F401
 
-Số công cụ, kiểu công cụ do thiết kế của nhóm quyết định — có bài chỉ cần một công cụ tra cứu.
-Công cụ có tác động ra ngoài: KHÔNG tự làm. Trả về bản nháp chờ người duyệt (guide bước 2.2, "chỗ người duyệt").
-Dữ liệu công cụ đọc (bài mẫu, thông báo mẫu, lịch…): để trong data/ và mô tả ở data/DATA_CARD.md.
-"""
-from tracing import tool, TOOLS  # noqa: F401  (TOOLS: danh sách công cụ đã đăng ký, dùng khi viết vòng lặp agent)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = os.path.join(ROOT, "data")
+
+
+def _load_json(name: str):
+    path = os.path.join(DATA, name)
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 @tool
-def search_example(query: str) -> list:
-    """(ví dụ — thay bằng công cụ của nhóm) Tra dữ liệu mẫu theo câu hỏi.
-    Input: câu hỏi (str). Output: danh sách đoạn {"code", "text"}. Không tác động ra ngoài."""
-    return [{"code": "VD-1", "text": "(ví dụ) đoạn dữ liệu giả — thay bằng dữ liệu thật của bài toán"}]
+def get_standup_policy() -> dict:
+    """Đọc quy tắc daily standup (cửa sổ giờ, field form).
+    Input: không. Output: dict policy (window, fields, rules). Không tác động ra ngoài."""
+    return _load_json("standup_policy.json")
+
+
+@tool
+def get_user_notes(user_id: str) -> dict:
+    """Lấy ghi chú standup đã lưu của user giả.
+    Input: user_id (str). Output: {"user_id", "notes", "updated_at", "found"}. Không tác động ra ngoài."""
+    db = _load_json("notes.json")
+    row = db.get(user_id)
+    if not row:
+        return {"user_id": user_id, "notes": "", "updated_at": None, "found": False}
+    notes = (row.get("notes") or "").strip()
+    return {
+        "user_id": user_id,
+        "notes": notes,
+        "updated_at": row.get("updated_at"),
+        "found": bool(notes),
+    }

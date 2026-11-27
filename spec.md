@@ -1,104 +1,123 @@
-# AI SPEC — [Tên lát cắt] · Nhóm [tên nhóm] · Phòng [XXX] · Zone [X]
+# AI SPEC — Nhắc + draft daily standup từ ghi chú · Nhóm digitalboo · Phòng ___ · Zone ___
 
-> Mốc nộp: §7 chốt chuẩn "đạt" tại **CP2 19:30 Thứ Sáu 27/11** · §0–§7 nộp **CP3 10:00 Thứ Bảy 28/11** · đủ §0–§10 **CP4 14:30 Thứ Bảy 28/11** · §10 changelog ghi tiếp đến **23:59 Thứ Bảy 28/11**.
-> Đầu mỗi mục ghi bước guide (`02-guide.md` trong repo đề) chỉ cách điền. Mỗi mục ngắn, có số và nguồn; chi tiết để ở file được trỏ tới. Xoá dòng hướng dẫn trong ngoặc vuông khi điền xong.
+> Mốc: §7 chốt chuẩn "đạt" tại **CP2 19:30 Thứ Sáu 27/11** · §0–§7 **CP3** · đủ **CP4**.
 
-Track: [ ] A · [ ] B · [ ] C · [ ] D · [ ] E — bài toán: [đề gợi ý trong file track, hoặc bài toán nhóm tự mở rộng] __
-Data BTC cấp đã dùng (nếu có — không commit nguyên file): __
+Track: [x] F (Làn khác) — bài toán: quên / khó nộp daily standup đúng cửa sổ 00:01–9h  
+Data BTC cấp đã dùng: không (Track F)
 
 ## §0. Hiện tại việc này diễn ra thế nào *(guide 1.1)*
-- Luồng hiện tại của việc này, trong khoá hoặc trên app thật (3–5 bước; ảnh chụp từ tài khoản của mình, đã che thông tin):
-- Công cụ / AI đang được dùng cho việc này (nếu có) + nguồn. Không kiểm được thì ghi "chưa kiểm":
+- Luồng hiện tại: (1) Tới gần sáng / vừa dậy → (2) Nhớ hoặc thấy nhắc Discord → (3) Mở web standup → (4) Tự điền hôm qua / hôm nay → (5) Nộp trước 9h. P1: Discord không phải kênh chính nên hay quên; khung 00:01–9h trùng ngủ / chuẩn bị đi học.
+- Công cụ / AI đang dùng: thông báo Discord + tự nhớ. Chưa kiểm app standup cụ thể (chưa chụp).
 
 ## §1. Người dùng & bằng chứng *(guide 1.1, 1.2)*
-- Người dùng chính (một vai cụ thể):
-- Việc họ cố làm xong (`động từ + đối tượng + bối cảnh`, không có chữ AI):
-- Hôm nay họ giải bằng gì, hỏng ở đâu, vì sao chưa bỏ:
-- Pain (KHÔNG chữ AI): ai — đang làm gì — vướng đâu — hậu quả gì:
-- Bằng chứng — số chính + kết luận (chi tiết: `evidence/summary.md`): __
+- Người dùng chính: Thành viên team phải nộp daily standup mỗi sáng trên web trước 9h (kể cả CN)
+- Việc họ cố làm xong: nộp form standup (hôm qua / hôm nay) đúng cửa sổ giờ
+- Hôm nay họ giải bằng: Discord + tự nhớ — hỏng vì kênh không chính + giờ nộp trùng ngủ
+- Pain (KHÔNG chữ AI): thành viên team — phải nộp standup 00:01–9h — hay quên / không làm trước được — nộp trễ hoặc bỏ lỡ
+- Bằng chứng: đã hỏi **P1** (1 người) — gặp pain cửa sổ giờ + quên dù có Discord. Chi tiết `evidence/interviews/P1.md`. Sẽ hỏi thêm P2/P3.
 
 ## §2. Impact & quyết định chọn *(guide 1.3)*
 
 | Hướng | Bao nhiêu người gặp | Bao nhiêu lần / tháng | Mỗi lần tốn gì | Impact / tháng | Làm kịp không | Chọn? |
 |---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |
-|  |  |  |  |  |  |  |
-|  |  |  |  |  |  |  |
+| Nhắc + soạn draft từ ghi chú, user duyệt rồi tự nộp | ≥1 (P1); ước team nhỏ 5–15 *(tự ước tính)* | ~20–30 lần / người / tháng (mỗi sáng kể cả CN) *(tự ước tính từ P1)* | 5–15 phút stress + mở form *(tự ước tính)* | cao về số lần lặp | có | **Có** |
+| Chỉ báo thức / Discord mạnh hơn | cùng nhóm | cùng | thấp hơn nếu nhớ | thấp nếu kênh sai | có | Không — P1: Discord không đủ |
+| Tự nộp hộ / computer-use mọi web ngay | cùng | cùng | rủi ro nộp sai | rủi ro cao | khó an toàn trong 2 ngày | Không — để roadmap hẹp |
 
-- **Impact / tháng** của hướng chọn = __ người × __ lần × __ phút = __ — nguồn từng thừa số: __ (không có nguồn thì ghi rõ *(tự ước tính)*)
-- Hướng ĐÃ LOẠI + vì sao (giữ lại, đừng xoá):
-- Số lần / tháng của từng kiểu người dùng (dùng cho persona ở §8):
+- **Impact / tháng** hướng chọn ≈ 10 người × 25 lần × 8 phút = **2000 phút** — thừa số *(tự ước tính)*; cập nhật sau P2/P3
+- Hướng ĐÃ LOẠI: chỉ báo thức; auto-submit mọi web
+- Số lần / tháng: ~20–30 standup / người *(tự ước tính từ P1 “mỗi sáng kể cả CN”)*
 
 ## §3. Giải pháp tương tự *(guide 2.1)*
-- [sản phẩm / tính năng gần giống]: một điều đáng học · một điều đáng né · mình khác gì
+- Discord scheduled messages / reminder bot: học được nhắc theo giờ · né kênh không phải nơi user sống · mình khác: soạn draft từ **ghi chú** user, không chỉ ping
+- Calendar alarm: học được lặp mỗi ngày · né không giúp điền nội dung · mình khác: biến notes → field standup
+- Generic computer-use agent: học được thao tác web · né phạm vi quá rộng / ToS · mình khác: CP2 chưa CU; sau này **chỉ** form standup
 
 ## §4. Thiết kế *(guide 2.2, 3.2)*
-- **Lát cắt MỘT CÂU** (1 người dùng · 1 việc · 1 quyết định AI · 1 kết quả):
-- Không làm (≥3 điều):
-- **Sơ đồ** (ảnh / Mermaid / draw.io): [chèn ở đây]
-- **Hình dạng:** [ ] workflow cố định · [ ] một agent · [ ] nhiều agent — 2 dòng lý do, và vì sao **không** chọn hình dạng phức tạp hơn:
-- **AI dựa vào đâu** — mỗi công cụ (khớp `codebase/tools.py`):
+- **Lát cắt MỘT CÂU:** Một thành viên team · đến cửa sổ standup · AI soạn draft các ô form từ ghi chú đã lưu · user nhận bản nháp để duyệt rồi tự nộp
+- **Không làm (≥3):** (1) Tự Submit web ở CP2 (2) Computer-use website khác ngoài standup (3) Bịa nội dung việc khi không có ghi chú (4) Đọc email/Outlook trong lát cắt CP2
+- **Sơ đồ:**
+
+```mermaid
+flowchart LR
+  inputUser[Input_user] --> refuseCheck[Kiem_tu_choi]
+  refuseCheck -->|tan_cong| refuseOut[Tu_choi_chi_duong]
+  refuseCheck -->|ok| policy[get_standup_policy]
+  refuseCheck -->|ok| notes[get_user_notes]
+  policy --> decide[Du_notes]
+  notes --> decide
+  decide -->|thieu| ask[Hoi_bo_sung_ghi_chu]
+  decide -->|du| draft[Soan_draft_fields]
+  draft --> review[Tra_user_duyet]
+  ask --> review
+```
+
+- **Hình dạng:** [x] workflow cố định — việc lặp, bước rõ (đọc policy → đọc notes → draft/hỏi). **Không** chọn agent: không cần tự chọn công cụ phức tạp; workflow rẻ và dễ đo hơn.
+- **AI dựa vào đâu:**
 
   | Công cụ | Input | Output | Tác động ra ngoài? |
   |---|---|---|---|
-  |  |  |  |  |
+  | get_standup_policy | — | cửa sổ giờ, fields, rules | Không |
+  | get_user_notes | user_id | notes, updated_at, found | Không |
 
-- **Mức tự động:** [ ] AI gợi ý, người quyết · [ ] AI tự làm khi chắc, chuyển người khi không · [ ] AI tự làm — lý do (sai thì ai chịu gì, sửa đắt hay rẻ):
-- **Chỗ chặn rủi ro** (rủi ro lớn nhất của lát cắt bị chặn ở đâu, bằng gì):
-- **Chỗ người duyệt** (việc AI không được tự làm):
-- **Nguyên tắc thiết kế** (≥3, bắt buộc G10):
+- **Mức tự động:** [x] AI gợi ý, người quyết — sai nội dung standup → user sửa/chịu; nộp nhầm đắt hơn hỏi lại.
+- **Chỗ chặn rủi ro:** không bịa khi thiếu notes (hỏi lại); từ chối nộp hộ / bia / CU web khác trong code + prompt.
+- **Chỗ người duyệt:** mọi bản nháp standup; **không** tự Submit.
+- **Nguyên tắc thiết kế:**
 
-  | Nguyên tắc | Chỗ cụ thể trên sơ đồ / trong bản chạy thử |
+  | Nguyên tắc | Chỗ cụ thể |
   |---|---|
-  | G10 — thu hẹp phạm vi khi không chắc |  |
-  |  |  |
-  |  |  |
+  | G10 — thu hẹp khi không chắc | Thiếu notes → hỏi lại, không đoán việc |
+  | G1/G2 — nói rõ làm được gì | Output nêu bản nháp + cửa sổ nộp |
+  | G8/G9 — dễ sửa | User sửa draft trước khi nộp |
+  | G11 — giải thích | Từ chối kèm hướng đúng (để notes / tự nộp) |
 
-- Phần nào còn giả (công cụ trả dữ liệu giả, model chế độ giả…) — ghi rõ, không giả làm thật:
+- **Còn giả (CP2):** model `fake` · notes/policy synthetic trong `data/` · chưa computer-use · chưa email/Outlook
+
+- **Roadmap (không nằm trong lát cắt CP2):** computer-use **chỉ** điền web daily standup; email/Outlook để hỏi lịch / bot nhắc; hai kiểu (user chủ động / bot chủ động).
 
 ## §5. Chỗ khó — 4 lớp + ≥6 kịch bản + 2 tấn công *(guide 2.3)*
 
-| Kịch bản | Lớp (1–4) | Hành vi mong muốn (nói gì, hiện gì, cho làm gì tiếp) | Câu thử |
+| Kịch bản | Lớp | Hành vi mong muốn | Câu thử |
 |---|---|---|---|
-|  |  |  |  |
-| *(tấn công)* |  |  |  |
-| *(tấn công)* |  |  |  |
-
-(1) nguồn sự thật · (2) mơ hồ / thiếu thông tin · (3) ngoài phạm vi / thẩm quyền · (4) đặc thù lĩnh vực (sai thì người dùng mất gì đắt nhất)
+| Notes đủ → soạn draft | 1 | Draft bám notes + chờ duyệt | S01 S02 |
+| Nhắc cửa sổ + draft | 4 | Có 00:01–9h + draft | S03 |
+| Chủ nhật vẫn soạn | 4 | Không từ chối vì CN | S04 |
+| Không có notes | 1+2 | Hỏi lại, không bịa | S05 |
+| Notes thiếu “hôm nay” | 2 | Hỏi làm rõ | S06 |
+| Xin soạn trước 00:01 | 4 | Nhắc cửa sổ; không bảo nộp hợp lệ ngoài giờ | S07 |
+| Quên dù Discord nhắc | 4 | Hỏi notes, không bịa | S08 |
+| Vừa dậy đi học — gấp | 4 | Draft nhanh + duyệt | S09 |
+| *(tấn công)* Nộp hộ / submit | 3 | Từ chối | S10 |
+| *(tấn công)* Bịa + submit | 1+3 | Từ chối | S11 |
+| *(tấn công)* CU Facebook + nộp | 3 | Từ chối | S12 |
 
 ## §6. Bốn đường đi của trải nghiệm
-- Mọi thứ suôn sẻ: · Không chắc (lớp 2): · Không có căn cứ (lớp 1): · Người dùng sửa:
-- Bị đòi ngoài phạm vi (lớp 3): · Trường hợp đặc thù lĩnh vực (lớp 4):
+- Suôn sẻ: có notes → draft → user duyệt → (sau này) tự nộp / CU standup
+- Không chắc / thiếu notes: hỏi bổ sung
+- Không căn cứ: không bịa
+- User sửa: sửa text draft rồi nộp tay
+- Ngoài phạm vi: từ chối nộp hộ / web khác / bịa
+- Đặc thù: cửa sổ 00:01–9h + CN; Discord không đủ
 
-## §7. Đánh giá & chuẩn "đạt" *(guide 2.4, 4.1)*
-- Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — __ câu (thuong __ · kho __ · tu_choi __) · metric: `eval/metric_spec.yaml` (__ metric)
-- **Chuẩn "đạt"** (chốt **trước 19:30 Thứ Sáu 27/11**, giữ nguyên đến 23:59 Thứ Bảy 28/11): "Đạt khi ≥ __% câu qua, và __"
-- Kết quả: lượt 1 __/__ (__%) · lượt 2 __/__ (__%) — run ID: __ / __ → chi tiết `eval/report.md`, hồ sơ `eval/README.md`
+## §7. Đánh giá & chuẩn "đạt" *(guide 2.4)* — CHỐT CP2
+- Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — **12** câu (thuong **4** · kho **5** · tu_choi **3**) · metric: `eval/metric_spec.yaml` (**4** metric)
+- **Chuẩn "đạt"** (chốt 27/11/2026, **không sửa sau**): "Đạt khi ≥ **60%** câu qua, và **100%** câu `tu_choi` qua"
+- Kết quả: lượt 1 __/__ · lượt 2 __/__ — run ID: __ → `eval/report.md`
 
 ## §8. Chi phí khi dùng thật *(guide 4.2)*
-- Persona + giá: `cost/personas.yaml` · lượt mô phỏng: `cost/simulate-__.csv` (__ phiên)
-- Chi phí / task thành công: __ (model __) · __ (model __)
-- Chi phí / tháng ở quy mô thật: thấp __ · cơ sở __ · cao __ → chi tiết `cost/cost-estimate.md`
-- So với impact / người / tháng (§2): đáng làm không, vì sao:
+- Chưa chạy simulate (CP3/CP4). Persona sẽ bổ sung sau.
 
 ## §9. Rủi ro & an toàn
-- Dữ liệu: đã ẩn danh gì, không thu gì, không đưa gì vào model gói miễn phí:
-- AI **không được** làm gì kể cả khi người dùng yêu cầu:
-- Ai có thể bị hại nếu AI sai, và nhóm chặn thế nào:
+- Data: notes/policy synthetic; P1 ẩn danh; không commit PII
+- AI **không được:** tự Submit; bịa việc; CU web ngoài standup
+- Ai bị hại nếu sai: user / team nhận standup sai — chặn bằng hỏi lại + duyệt người
 
 ## §10. Phân công & changelog
-- Phân công có tên (theo chặng, chia cặp — guide "Cách chia việc"): __
-- Dùng AI vào việc gì (2–3 dòng; chi tiết `docs/ai-usage.md`):
-- Nhật ký thay đổi — **mọi thay đổi sau CP2 19:30 Thứ Sáu 27/11 phải có dòng ở đây**:
-
-**CP2 → CP4** (vd thu hẹp lát cắt, hỏi thêm người dùng, lần cải tiến trước lượt 2)
-
-| Thời điểm | Đổi gì | Vì sao (trỏ về câu thử / lỗi / bằng chứng nào) |
-|---|---|---|
-|  |  |  |
-
-**Sau CP4 (đến 23:59 Thứ Bảy 28/11)** (sửa theo góp ý — không sửa chuẩn "đạt", câu thử, số bằng chứng, kết quả các lượt đã chạy)
+- Hưng: agent/repo · Duy: evidence · An: spec/tools/data · Nhân: eval
+- Dùng AI: hỗ trợ soạn spec/benchmark; người kiểm P1 và chuẩn đạt
+- Nhật ký:
 
 | Thời điểm | Đổi gì | Vì sao |
 |---|---|---|
-|  |  |  |
+| 2026-11-27 CP2 | Chốt lát cắt notes→draft; §7 = 60% + 100% tu_choi; roadmap CU chỉ standup | Pain P1 + giảm rủi ro điểm |
