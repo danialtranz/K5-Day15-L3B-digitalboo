@@ -1,20 +1,19 @@
 # Harness (ngoài lát cắt CP2)
 
-Gmail OAuth + FastAPI + Postgres/Redis + Playwright standup (1 URL allowlist).
+Gmail OAuth + FastAPI + Postgres/Redis + Playwright standup (hybrid computer-use).
 
 `python run.py` / eval CP2 **không** phụ thuộc thư mục này.
 
 ## 1. Docker (chỉ Postgres + Redis)
 
 ```powershell
-# Đảm bảo đã có .env (copy từ .env.example, mật khẩu đã có sẵn trong .env local)
 cd dockers
 docker compose -f dockercompose.yaml --env-file ../.env up -d
 ```
 
 Port chỉ localhost, non-default: `15432` (Postgres), `16379` (Redis).
 
-## 2. Venv + deps (trong repo)
+## 2. Venv + deps
 
 ```powershell
 cd D:\src\AIInAction\day15-minihackathon
@@ -25,62 +24,75 @@ python -m playwright install chromium
 python -m harness init-db
 ```
 
-Luôn dùng `.\.venv\Scripts\python.exe` hoặc activate trước khi `harness serve` — không cài vào user site-packages.
-
 ## 3. Gmail OAuth
 
-1. Google Cloud Console → OAuth client (Web)  
-2. Redirect URI: `http://127.0.0.1:8000/email/oauth/google/callback`  
-3. Điền `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` vào `.env`  
-4. Activate venv rồi chạy API:
+Redirect URI: `http://127.0.0.1:8000/email/oauth/google/callback`  
+Điền `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` + `API_KEY` (OpenAI) trong `.env`.
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
 python -m harness serve
-# Mở: http://127.0.0.1:8000/email/oauth/google/start
 ```
 
-## 4. API chính
-
-Auth tối giản: `user_id` phải có trong bảng `users` (seed sẵn `u1`).
-
-Orchestrator: **1 lần** LLM detect intent (không keyword) → 3 intent:
+## 4. Intent + HITL
 
 | Intent | Việc |
 |---|---|
-| `conversation` | Chào hỏi / chat thường |
-| `standup_fill` | Tự điền standup — cần `yesterday`, `today`, `url`; `schedule_at` optional (Redis delayed job) |
-| `email_watch` | Đọc mail quan trọng — HITL nếu chưa Gmail grant (có thể “bỏ qua grant”); `notify_interval_sec` optional |
+| `conversation` | Chat thường |
+| `standup_fill` | Điền standup (yesterday/today/url) hoặc **hẹn lịch daily/weekly** — đến giờ hỏi nội dung (HITL + toast), rồi mới CU |
+| `email_watch` | Đọc mail quan trọng; HITL nếu chưa Gmail; có thể **hẹn lịch** |
 
-**HITL** kiểu LangGraph checkpointer: thiếu slot → `hitl_checkpoints` status=`interrupted` → tin nhắn sau cùng `session_id` được merge bằng LLM rồi chạy tiếp.
+### Email lịch (timezone `Asia/Ho_Chi_Minh`)
+
+User nói hẹn giờ (vd “mỗi sáng thứ Năm lúc 7h”) → LLM trích:
+
+- `schedule_enabled`, `schedule_time` (`07:00`)
+- `schedule_weekday` (0=Mon … 6=Sun; Thứ Năm = 3)
+- `schedule_repeat`: `weekly` nếu “mỗi/lặp”; `once` nếu một lần
+- `schedule_date`: `YYYY-MM-DD` khi one-shot có ngày
+- `run_now`: true nếu vừa muốn kiểm tra ngay
+
+Thiếu giờ/thứ/ngày → HITL (`missing_fields` chứa message LLM thân thiện).  
+Đủ → Redis `jobs:delayed`; tới giờ scheduler quét mail → ghi `notifications`.
+
+Query mail mặc định: unread **7 ngày**; user nêu khung thời gian thì theo yêu cầu.
+
+### Desktop notifications
+
+Mỗi `notify.push` ghi Postgres + `outbox/` **và** hiện balloon tip ngay trên desktop Windows (NotifyIcon).
+
+Poll API (tuỳ chọn, app khác đọc):
+
+```http
+GET /email/notifications?user_id=u1&unread_only=true
+GET /email/notifications?user_id=u1&since_id=42
+POST /email/notifications/{id}/read?user_id=u1
+POST /email/notifications/read-all?user_id=u1
+```
+
+### Computer-use hybrid (standup)
+
+Router trong `harness/computer_use/`:
+
+| URL | Strategy | Cách điền |
+|---|---|---|
+| Khớp playbook Edufun (`sites.yaml` → `portal-cohort5.edufun.ai` + `/my-submissions`) | **scripted** | Selector YAML (`#standup-yesterday` / `#standup-today`, ≥40 ký tự) |
+| HTTPS URL khác user cung cấp | **vision** | Screenshot → multimodal LLM → click/type (tối đa `vision.max_steps`) |
+
+Chung: Playwright mở browser → nếu cần login / chưa thấy form → **HITL `browser_login`** (giữ cửa sổ mở, user đăng nhập rồi nhắn lại) → điền form.  
+`STANDUP_ALLOWLIST_URL` vẫn là URL mặc định / grant Edufun.
+
+**Lịch daily/weekly:** payload Redis **không** lưu sẵn yesterday/today. Tới giờ → toast «cần nội dung» + HITL trong đúng `session_id` lúc hẹn → user trả lời chat → CU ngay. Không trả lời trong 2 giờ → toast bỏ lỡ; lịch ngày sau vẫn giữ.
 
 | Method | Path | Việc |
 |---|---|---|
-| POST | `/auth/login` | `{"user_id":"u1"}` → `session_id` |
-| GET | `/auth/me?user_id=u1` | kiểm tra user |
-| GET | `/auth/chat/history?session_id=...&user_id=u1` | lịch sử chat |
-| GET | `/health` | health |
-| POST | `/ask` | `{"text":"...","user_id":"u1","session_id":"..."}` |
-| GET | `/email/oauth/google/start` | Connect Gmail |
-| GET | `/email/status` | Trạng thái connect |
-| POST | `/email/watch` | Quét mail quan trọng |
-| GET | `/email/notifications` | Tin agent báo user |
-| POST | `/standup/grant` | `{"url":"https://..."}` |
-| POST | `/standup/run` | `{"force":true}` thử ngoài cửa sổ |
+| POST | `/ask` | Chat + orchestrator |
+| GET | `/auth/sessions?user_id=u1` | Danh sách session chat |
+| POST | `/auth/sessions` | Tạo session mới |
+| GET | `/auth/chat/history?session_id=...&user_id=u1` | Lịch sử tin trong session |
+| GET | `/email/oauth/google/start?format=json&user_id=u1&session_id=...` | `oauth_url` popup |
+| GET | `/email/notifications` | Poll notify |
+| POST | `/email/notifications/{id}/read` | Đánh dấu đã đọc |
 
-## 5. Standup CU
+## 5. Scheduler
 
-1. Set `STANDUP_ALLOWLIST_URL` đúng form standup  
-2. Chỉnh selector trong `harness/config/sites.yaml`  
-3. `python -m harness grant-standup --url https://...`  
-4. `python -m harness run-standup --now` — cửa sổ browser mở, **bạn tự login**, agent điền + Submit  
-
-## 6. Scheduler (Redis delayed jobs)
-
-`python -m harness serve` **tự start** background thread poll `jobs:delayed`. Không cần process riêng.
-
-CLI vẫn còn nếu muốn chạy tách:
-
-```powershell
-python -m harness scheduler
-```
+`python -m harness serve` tự start background thread poll Redis. Weekly job tự `schedule_job` lại sau mỗi lần chạy.

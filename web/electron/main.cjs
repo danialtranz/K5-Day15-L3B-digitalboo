@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, Notification } = require('electron')
 const path = require('path')
 
 const isDev = !app.isPackaged
@@ -54,6 +54,15 @@ ipcMain.handle('window:maximize', () => {
 
 ipcMain.handle('window:close', () => {
   mainWindow?.close()
+})
+
+ipcMain.handle('app:notify', (_event, payload) => {
+  const title = String(payload?.title || 'Haven')
+  const body = String(payload?.body || '')
+  if (!Notification.isSupported()) return false
+  const n = new Notification({ title, body, silent: false })
+  n.show()
+  return true
 })
 
 app.whenReady().then(() => {

@@ -16,7 +16,11 @@ from harness.config import settings
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
-SCOPE = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email"
+SCOPE = (
+    "https://www.googleapis.com/auth/gmail.readonly "
+    "https://www.googleapis.com/auth/gmail.send "
+    "https://www.googleapis.com/auth/userinfo.email"
+)
 
 
 class GmailProvider:
@@ -78,14 +82,21 @@ class GmailProvider:
                 return None
             return r.json().get("email")
 
-    def list_messages(self, access_token: str, limit: int = 20) -> list[EmailMessage]:
+    def list_messages(
+        self,
+        access_token: str,
+        limit: int = 20,
+        query: str | None = None,
+    ) -> list[EmailMessage]:
+        """query: Gmail search string. Mặc định unread trong 7 ngày."""
+        q = (query or "").strip() or "is:unread newer_than:7d"
         headers = {"Authorization": f"Bearer {access_token}"}
         out: list[EmailMessage] = []
         with httpx.Client(timeout=60) as client:
             r = client.get(
                 f"{GMAIL_API}/users/me/messages",
                 headers=headers,
-                params={"maxResults": limit, "q": "is:unread newer_than:7d"},
+                params={"maxResults": limit, "q": q},
             )
             r.raise_for_status()
             ids = [m["id"] for m in (r.json().get("messages") or [])]
@@ -98,6 +109,49 @@ class GmailProvider:
                 mr.raise_for_status()
                 out.append(self._parse_message(mr.json()))
         return out
+
+    def send_message(
+        self,
+        access_token: str,
+        *,
+        to: str,
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+        from_addr: str | None = None,
+    ) -> dict[str, Any]:
+        """Gửi mail qua Gmail API (users.messages.send). Cần scope gmail.send."""
+        from email.header import Header
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        to = (to or "").strip()
+        if not to:
+            raise ValueError("missing_to")
+        from_line = (from_addr or "").strip() or to
+
+        if body_html:
+            msg: MIMEMultipart | MIMEText = MIMEMultipart("alternative")
+            msg.attach(MIMEText(body_text or "", "plain", "utf-8"))
+            msg.attach(MIMEText(body_html, "html", "utf-8"))
+        else:
+            msg = MIMEText(body_text or "", "plain", "utf-8")
+
+        msg["To"] = to
+        msg["From"] = from_line
+        # RFC 2047 — tránh subject tiếng Việt bị mojibake (Ä iá» n…)
+        msg["Subject"] = Header(subject or "(no subject)", "utf-8")
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii").rstrip("=")
+        headers = {"Authorization": f"Bearer {access_token}"}
+        with httpx.Client(timeout=30) as client:
+            r = client.post(
+                f"{GMAIL_API}/users/me/messages/send",
+                headers=headers,
+                json={"raw": raw},
+            )
+            r.raise_for_status()
+            return r.json()
 
     def _to_bundle(self, payload: dict[str, Any]) -> TokenBundle:
         expires_in = int(payload.get("expires_in") or 3600)

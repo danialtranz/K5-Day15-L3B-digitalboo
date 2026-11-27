@@ -69,6 +69,38 @@ def call_openai(system, user):
     }
 
 
+def call_openai_vision(system, user, image_png_bytes):
+    """Chat Completions multimodal: text + 1 ảnh PNG (base64)."""
+    import base64
+
+    b64 = base64.standard_b64encode(image_png_bytes).decode("ascii")
+    data_url = "data:image/png;base64," + b64
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        }
+    )
+    data = post_json(
+        URL_OPENAI,
+        {"Authorization": "Bearer " + API_KEY},
+        {"model": MODEL_NAME, "messages": messages},
+        timeout=120,
+    )
+    u = data["usage"]
+    return {
+        "text": data["choices"][0]["message"]["content"],
+        "tokens_in": u["prompt_tokens"],
+        "tokens_out": u["completion_tokens"],
+    }
+
+
 @model_call
 def call_model(system: str, user: str) -> dict:
     if MODEL_PROVIDER == "fake":
@@ -90,4 +122,29 @@ def call_model(system: str, user: str) -> dict:
     raise NotImplementedError(
         "chưa viết phần gọi model thật cho MODEL_PROVIDER=%s trong codebase/ai.py — xem docs/connect-model.md"
         % MODEL_PROVIDER
+    )
+
+
+@model_call
+def call_model_vision(system: str, user: str, image_png_bytes: bytes) -> dict:
+    """Gọi model kèm ảnh (computer-use vision). Token lấy từ usage API."""
+    if not image_png_bytes:
+        raise ValueError("call_model_vision cần image_png_bytes")
+    if MODEL_PROVIDER == "fake":
+        return {
+            "text": '{"op":"done","ok":false,"reason":"fake provider — chưa nối vision"}',
+            "model": "fake",
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
+    if MODEL_PROVIDER == "openai":
+        r = call_openai_vision(system, user, image_png_bytes)
+        return {
+            "text": r["text"],
+            "model": MODEL_NAME,
+            "tokens_in": int(r["tokens_in"]),
+            "tokens_out": int(r["tokens_out"]),
+        }
+    raise NotImplementedError(
+        "chưa viết vision cho MODEL_PROVIDER=%s trong codebase/ai.py" % MODEL_PROVIDER
     )

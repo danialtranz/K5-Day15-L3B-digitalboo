@@ -7,13 +7,24 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from harness.config import settings
-from harness.db.auth import create_session, get_user, list_chat, require_user
+from harness.db.auth import (
+    create_session,
+    end_session,
+    get_user,
+    list_chat,
+    list_sessions,
+    require_user,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginBody(BaseModel):
     user_id: str
+
+
+class NewSessionBody(BaseModel):
+    user_id: Optional[str] = None
 
 
 @router.post("/login")
@@ -29,6 +40,30 @@ def login(body: LoginBody):
         "session_id": session["session_id"],
         "session": session,
     }
+
+
+@router.get("/sessions")
+def sessions(
+    user_id: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    uid = user_id or settings()["default_user_id"]
+    require_user(uid)
+    return {"items": list_sessions(uid, limit=limit)}
+
+
+@router.post("/sessions")
+def new_session(body: NewSessionBody):
+    uid = body.user_id or settings()["default_user_id"]
+    session = create_session(uid)
+    return {"ok": True, "session_id": session["session_id"], "session": session}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, user_id: Optional[str] = None):
+    uid = user_id or settings()["default_user_id"]
+    ended = end_session(session_id, uid)
+    return {"ok": True, "session": ended}
 
 
 @router.get("/me")

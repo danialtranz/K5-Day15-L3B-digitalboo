@@ -43,6 +43,11 @@ def settings() -> dict[str, Any]:
         "login_wait_timeout_sec": int(_env("LOGIN_WAIT_TIMEOUT_SEC", "300") or "300"),
         "email_watch_interval_sec": int(_env("EMAIL_WATCH_INTERVAL_SEC", "300") or "300"),
         "standup_timezone": _env("STANDUP_TIMEZONE", "Asia/Ho_Chi_Minh"),
+        "mem0_api_key": _env("MEM0_API_KEY", ""),
+        "mem0_enabled": (_env("MEM0_ENABLED", "1") or "1") == "1",
+        # oss = local Memory() + OpenAI key (demo ổn)
+        # platform = MemoryClient + MEM0_API_KEY (cần BYOK sau free trial)
+        "mem0_mode": (_env("MEM0_MODE", "oss") or "oss").strip().lower(),
         "root": ROOT,
         "state_dir": ROOT / "harness" / "state",
         "outbox_dir": ROOT / "outbox",

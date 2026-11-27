@@ -3,45 +3,292 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from harness.config import load_yaml, settings
 from harness.db.redis_client import acquire_lock, release_lock
 from harness.flows.email_watch import run_email_watch
+from harness.flows.standup_prompt import (
+    expire_standup_content_prompt,
+    fields_ready,
+    prompt_standup_content,
+)
 from harness.flows.standup_submit import run_standup_submit
-from harness.jobs.delayed import pop_due, schedule_job
+from harness.jobs.delayed import next_run_unix, pop_due, schedule_job
 
 _stop = threading.Event()
 _thread: Optional[threading.Thread] = None
 
 
+def _reschedule_standup(payload: dict) -> None:
+    """Lặp daily/weekly: xếp lần chạy kế tiếp; luôn xóa fields để hỏi lại mỗi ngày."""
+    repeat = (payload.get("schedule_repeat") or "").strip()
+    if repeat not in ("daily", "weekly"):
+        return
+    state = {
+        "schedule_enabled": True,
+        "schedule_repeat": repeat,
+        "schedule_time": payload.get("schedule_time"),
+        "schedule_weekday": payload.get("schedule_weekday"),
+        "schedule_date": payload.get("schedule_date"),
+    }
+    nxt = next_run_unix(state, timezone_name=settings()["standup_timezone"], after_unix=time.time() + 1)
+    if nxt:
+        next_payload = dict(payload)
+        next_payload["fields"] = None
+        job_id = schedule_job("standup_fill", next_payload, nxt)
+        print(f"[scheduler] rescheduled standup {repeat} → {job_id} @ {nxt}")
+
+
+def _notify_standup_job(uid: str, result: dict) -> None:
+    """Luôn báo desktop sau job lịch — một lần duy nhất (submit chạy silent)."""
+    from harness.channels import notify as notify_mod
+
+    if result.get("ok"):
+        notify_mod.push(
+            uid,
+            "standup_ok",
+            "Standup theo lịch — thành công",
+            result.get("message") or "Đã điền và nộp standup theo lịch.",
+            result.get("detail") or result,
+        )
+        return
+
+    kind = "standup_fail"
+    title = "Standup theo lịch — thất bại"
+    if result.get("need_login") or result.get("error") == "need_login":
+        kind = "standup_login"
+        title = "Standup theo lịch — cần đăng nhập"
+    elif result.get("error") == "no_notes":
+        title = "Standup theo lịch — thiếu nội dung"
+    elif result.get("error") == "already_done":
+        title = "Standup theo lịch — đã nộp hôm nay"
+    msg = result.get("message") or result.get("error") or "Standup theo lịch chưa hoàn tất."
+    notify_mod.push(uid, kind, title, str(msg), result)
+
+
+def _handle_standup_due(uid: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Tới hạn: có fields → CU; không → HITL hỏi nội dung."""
+    fields = payload.get("fields")
+    if fields_ready(fields):
+        result = run_standup_submit(
+            user_id=uid,
+            force=bool(payload.get("force", True)),
+            fields=fields,
+            url=payload.get("url"),
+            notify=False,
+            await_login=True,
+        )
+        print(result)
+        try:
+            _notify_standup_job(
+                uid,
+                result if isinstance(result, dict) else {"ok": False, "message": str(result)},
+            )
+        except Exception as ne:
+            print("[scheduler] standup notify error:", ne)
+        return result if isinstance(result, dict) else {"ok": False}
+
+    # Thiếu nội dung ngày hôm đó → hỏi user
+    prompt = prompt_standup_content(
+        uid,
+        url=payload.get("url"),
+        session_id=payload.get("session_id"),
+        schedule_meta={
+            "schedule_time": payload.get("schedule_time"),
+            "schedule_repeat": payload.get("schedule_repeat"),
+        },
+    )
+    print("[scheduler] standup awaiting content:", prompt)
+    return prompt
+
+
+def _email_job_outcome(
+    uid: str,
+    *,
+    job_type: str | None,
+    job_id: str | None,
+    ok: bool,
+    result: Any = None,
+    error: str | None = None,
+    source: str = "scheduler",
+) -> None:
+    """Gửi kết quả cron (ok/fail) về Gmail user — best-effort."""
+    try:
+        from harness.channels.email.report import send_job_result_email
+
+        mailed = send_job_result_email(
+            uid,
+            job_type=job_type,
+            job_id=job_id,
+            ok=ok,
+            result=result,
+            error=error,
+            source=source,
+        )
+        if mailed.get("ok"):
+            print(f"[scheduler] emailed result → {mailed.get('to')} ({mailed.get('subject')})")
+        else:
+            print(f"[scheduler] email result skipped/failed: {mailed}")
+    except Exception as e:
+        print("[scheduler] email result error:", e)
+
+
+def execute_delayed_job(job: dict[str, Any], *, source: str = "scheduler") -> dict[str, Any]:
+    """Chạy 1 delayed job (cron due hoặc kích hoạt tay). Trả kết quả tóm tắt."""
+    jtype = job.get("job_type")
+    payload = job.get("payload") or {}
+    uid = payload.get("user_id") or settings()["default_user_id"]
+    job_id = job.get("id")
+    print(f"[scheduler] run job {job_id} ({jtype}) source={source}")
+    try:
+        if jtype == "standup_fill":
+            try:
+                result = _handle_standup_due(uid, payload)
+            finally:
+                # Xếp lịch lần sau (kể cả đang chờ nội dung) để không mất chu kỳ daily
+                try:
+                    _reschedule_standup(payload)
+                except Exception as re:
+                    print("[scheduler] standup reschedule error:", re)
+            # awaiting_content = đã hỏi trong chat (HITL), không phải lỗi chạy job
+            awaiting = isinstance(result, dict) and bool(
+                result.get("awaiting_content")
+                or result.get("need_hitl")
+                or result.get("need_login")
+            )
+            ok = bool((result or {}).get("ok", True)) if not awaiting else True
+            if isinstance(result, dict) and result.get("need_login") and not result.get("awaiting_content"):
+                ok = False
+            out = {
+                "ok": ok,
+                "job_id": job_id,
+                "job_type": jtype,
+                "result": result,
+                "awaiting_content": awaiting,
+                "session_id": (result or {}).get("session_id") if isinstance(result, dict) else None,
+            }
+            _email_job_outcome(
+                uid,
+                job_type=jtype,
+                job_id=job_id,
+                ok=ok,
+                result=result,
+                source=source,
+            )
+            return out
+
+        if jtype == "standup_content_timeout":
+            result = expire_standup_content_prompt(
+                uid,
+                session_id=str(payload.get("session_id") or ""),
+                checkpoint_id=payload.get("checkpoint_id"),
+                url=payload.get("url"),
+            )
+            print(result)
+            out = {
+                "ok": True,
+                "job_id": job_id,
+                "job_type": jtype,
+                "result": result,
+            }
+            _email_job_outcome(
+                uid,
+                job_type=jtype,
+                job_id=job_id,
+                ok=True,
+                result=result,
+                source=source,
+            )
+            return out
+
+        if jtype == "email_watch":
+            state = dict(payload.get("state") or {})
+            for k in ("schedule_repeat", "schedule_weekday", "schedule_time", "schedule_date"):
+                if payload.get(k) is not None and state.get(k) is None:
+                    state[k] = payload.get(k)
+            result = run_email_watch(
+                uid,
+                state=state,
+                source=source if source != "scheduler" else "scheduled_email_watch",
+            )
+            print(result)
+            if payload.get("repeat") or (state.get("schedule_repeat") == "weekly"):
+                if (payload.get("schedule_repeat") or state.get("schedule_repeat")) == "weekly":
+                    nxt = next_run_unix(state, after_unix=time.time() + 1)
+                    if nxt:
+                        schedule_job("email_watch", payload, nxt)
+                elif payload.get("notify_interval_sec"):
+                    interval = int(payload["notify_interval_sec"])
+                    schedule_job("email_watch", payload, time.time() + interval)
+            ok = bool((result or {}).get("ok", False))
+            out = {
+                "ok": ok,
+                "job_id": job_id,
+                "job_type": jtype,
+                "result": result,
+            }
+            _email_job_outcome(
+                uid,
+                job_type=jtype,
+                job_id=job_id,
+                ok=ok,
+                result=result,
+                source=source,
+            )
+            return out
+
+        out = {
+            "ok": False,
+            "job_id": job_id,
+            "job_type": jtype,
+            "error": f"unknown_job_type:{jtype}",
+        }
+        _email_job_outcome(
+            uid,
+            job_type=jtype,
+            job_id=job_id,
+            ok=False,
+            error=out["error"],
+            source=source,
+        )
+        return out
+    except Exception as e:
+        print("[scheduler] delayed job error:", e)
+        if jtype == "standup_fill":
+            try:
+                from harness.channels import notify as notify_mod
+
+                notify_mod.push(
+                    uid,
+                    "standup_fail",
+                    "Standup thất bại",
+                    f"Lỗi khi chạy standup theo lịch: {e}",
+                    {"error": str(e)},
+                )
+                _reschedule_standup(payload)
+            except Exception as ne:
+                print("[scheduler] standup error-notify failed:", ne)
+        out = {
+            "ok": False,
+            "job_id": job_id,
+            "job_type": jtype,
+            "error": str(e),
+        }
+        _email_job_outcome(
+            uid,
+            job_type=jtype,
+            job_id=job_id,
+            ok=False,
+            error=str(e),
+            source=source,
+        )
+        return out
+
+
 def _run_delayed_jobs() -> None:
     for job in pop_due():
-        jtype = job.get("job_type")
-        payload = job.get("payload") or {}
-        uid = payload.get("user_id") or settings()["default_user_id"]
-        print("[scheduler] due job", job.get("id"), jtype)
-        try:
-            if jtype == "standup_fill":
-                print(
-                    run_standup_submit(
-                        user_id=uid,
-                        force=bool(payload.get("force", True)),
-                        fields=payload.get("fields"),
-                        url=payload.get("url"),
-                    )
-                )
-            elif jtype == "email_watch":
-                print(run_email_watch(uid))
-                interval = payload.get("notify_interval_sec")
-                if payload.get("repeat") and interval:
-                    schedule_job(
-                        "email_watch",
-                        payload,
-                        time.time() + int(interval),
-                    )
-        except Exception as e:
-            print("[scheduler] delayed job error:", e)
+        execute_delayed_job(job, source="scheduler")
 
 
 def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = None) -> None:
@@ -63,10 +310,10 @@ def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = No
                 release_lock("lock:sched:delayed")
 
         now = time.time()
-        if now - last_email >= email_every:
+        if email_every < 86400 * 365 and now - last_email >= email_every:
             if acquire_lock("lock:sched:email", ttl_sec=min(email_every, 120)):
                 try:
-                    print("[scheduler] background email…", run_email_watch())
+                    print("[scheduler] background email…", run_email_watch(source="background"))
                 except Exception as e:
                     print("[scheduler] email error:", e)
                 finally:
@@ -75,7 +322,6 @@ def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = No
 
         if once:
             break
-        # ngủ theo chunk ngắn để phản ứng stop nhanh
         for _ in range(5):
             if stop_event is not None and stop_event.is_set():
                 break

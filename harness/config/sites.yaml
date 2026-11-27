@@ -1,21 +1,40 @@
-# Allowlist standup — chỉ host/path này được computer-use.
-standup:
-  site_id: daily_standup
-  # URL thật ghi vào .env STANDUP_ALLOWLIST_URL; file này bổ sung selector.
-  url_env: STANDUP_ALLOWLIST_URL
+# Computer-use playbooks + vision defaults.
+# Edufun khớp match → strategy scripted; URL khác → vision CU.
+
+playbooks:
+  edufun_standup:
+    match:
+      hosts:
+        - portal-cohort5.edufun.ai
+      path_prefix: /my-submissions
+    strategy: scripted
+    # Edufun portal: mỗi field tối thiểu 40 ký tự (trim).
+    min_chars: 40
+    fields:
+      yesterday:
+        selector: "#standup-yesterday, textarea[name='yesterday'], [data-field='yesterday']"
+        label_contains: "Hôm qua"
+      today:
+        selector: "#standup-today, textarea[name='today'], [data-field='today']"
+        label_contains: "Hôm nay"
+      blockers:
+        selector: "#standup-blocker, textarea[name='blockers'], [data-field='blockers']"
+        label_contains: "Đang vướng"
+    submit_selector: "button:has-text('Nộp standup'), button:has-text('Cập nhật standup'), button[type='submit']"
+    success_patterns:
+      - "Đã nộp daily standup"
+      - "đã nộp"
+      - "submitted"
+      - "success"
+    form_ready_selector: "#standup-yesterday"
+
+vision:
+  max_steps: 12
   login_url_patterns:
     - "/login"
     - "/signin"
+    - "/oauth/"
+    - "oauth/authorize"
     - "accounts.google.com"
-  fields:
-    yesterday:
-      selector: "textarea[name='yesterday'], #yesterday, [data-field='yesterday']"
-    today:
-      selector: "textarea[name='today'], #today, [data-field='today']"
-    blockers:
-      selector: "textarea[name='blockers'], #blockers, [data-field='blockers']"
-  submit_selector: "button[type='submit'], button:has-text('Submit'), button:has-text('Nộp')"
-  success_patterns:
-    - "submitted"
-    - "đã nộp"
-    - "success"
+    - "github.com/login"
+    - "login.microsoftonline.com"

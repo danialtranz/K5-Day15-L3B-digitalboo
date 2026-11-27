@@ -27,9 +27,6 @@ class RunBody(BaseModel):
 @router.post("/grant")
 def grant(body: GrantBody):
     user_id = body.user_id or settings()["default_user_id"]
-    allow = settings()["standup_allowlist_url"]
-    if not allow:
-        raise HTTPException(400, "Thiếu STANDUP_ALLOWLIST_URL trong .env")
     try:
         row = upsert_grant(user_id, str(body.url), allow_submit=body.allow_submit)
     except PermissionError as e:
