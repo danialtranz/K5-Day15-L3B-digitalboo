@@ -1,13 +1,18 @@
-"""Vòng cron: xử lý Redis delayed jobs + email/standup định kỳ."""
+"""Vòng cron: xử lý Redis delayed jobs (+ email nền). Chạy nền khi harness serve."""
 from __future__ import annotations
 
+import threading
 import time
+from typing import Optional
 
 from harness.config import load_yaml, settings
 from harness.db.redis_client import acquire_lock, release_lock
 from harness.flows.email_watch import run_email_watch
 from harness.flows.standup_submit import run_standup_submit
 from harness.jobs.delayed import pop_due, schedule_job
+
+_stop = threading.Event()
+_thread: Optional[threading.Thread] = None
 
 
 def _run_delayed_jobs() -> None:
@@ -28,7 +33,6 @@ def _run_delayed_jobs() -> None:
                 )
             elif jtype == "email_watch":
                 print(run_email_watch(uid))
-                # lặp chu kỳ nếu repeat
                 interval = payload.get("notify_interval_sec")
                 if payload.get("repeat") and interval:
                     schedule_job(
@@ -40,13 +44,18 @@ def _run_delayed_jobs() -> None:
             print("[scheduler] delayed job error:", e)
 
 
-def run_scheduler(once: bool = False) -> None:
+def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = None) -> None:
+    """Poll Redis delayed jobs. once=True chạy 1 vòng; có stop_event để dừng background."""
     s = settings()
     sched = load_yaml("schedule.yaml")
     email_every = int((sched.get("email_watch") or {}).get("interval_sec") or s["email_watch_interval_sec"])
     print(f"[scheduler] delayed jobs + optional email every {email_every}s")
     last_email = 0.0
     while True:
+        if stop_event is not None and stop_event.is_set():
+            print("[scheduler] stopped")
+            break
+
         if acquire_lock("lock:sched:delayed", ttl_sec=30):
             try:
                 _run_delayed_jobs()
@@ -54,7 +63,6 @@ def run_scheduler(once: bool = False) -> None:
                 release_lock("lock:sched:delayed")
 
         now = time.time()
-        # quét email nền (không bắt buộc HITL) — có thể tắt bằng interval rất lớn
         if now - last_email >= email_every:
             if acquire_lock("lock:sched:email", ttl_sec=min(email_every, 120)):
                 try:
@@ -67,4 +75,34 @@ def run_scheduler(once: bool = False) -> None:
 
         if once:
             break
-        time.sleep(5)
+        # ngủ theo chunk ngắn để phản ứng stop nhanh
+        for _ in range(5):
+            if stop_event is not None and stop_event.is_set():
+                break
+            time.sleep(1)
+
+
+def start_background_scheduler() -> None:
+    """Khởi động thread scheduler (idempotent)."""
+    global _thread
+    if _thread is not None and _thread.is_alive():
+        return
+    _stop.clear()
+    _thread = threading.Thread(
+        target=run_scheduler,
+        kwargs={"once": False, "stop_event": _stop},
+        name="harness-redis-scheduler",
+        daemon=True,
+    )
+    _thread.start()
+    print("[scheduler] background thread started (with harness serve)")
+
+
+def stop_background_scheduler() -> None:
+    global _thread
+    _stop.set()
+    t = _thread
+    if t is not None and t.is_alive():
+        t.join(timeout=8)
+    _thread = None
+    print("[scheduler] background thread stopped")

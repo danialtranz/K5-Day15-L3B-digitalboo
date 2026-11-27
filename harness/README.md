@@ -75,7 +75,11 @@ Orchestrator: **1 lần** LLM detect intent (không keyword) → 3 intent:
 3. `python -m harness grant-standup --url https://...`  
 4. `python -m harness run-standup --now` — cửa sổ browser mở, **bạn tự login**, agent điền + Submit  
 
-## 6. Scheduler
+## 6. Scheduler (Redis delayed jobs)
+
+`python -m harness serve` **tự start** background thread poll `jobs:delayed`. Không cần process riêng.
+
+CLI vẫn còn nếu muốn chạy tách:
 
 ```powershell
 python -m harness scheduler
