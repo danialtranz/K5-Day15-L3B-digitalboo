@@ -7,6 +7,18 @@ from typing import Any, Optional
 from harness.db.session import get_connection
 
 
+def _row_to_checkpoint(row: Any) -> dict[str, Any]:
+    out = dict(row)
+    if isinstance(out.get("state"), str):
+        out["state"] = json.loads(out["state"])
+    if isinstance(out.get("missing_fields"), str):
+        out["missing_fields"] = json.loads(out["missing_fields"])
+    for k in ("created_at", "updated_at"):
+        if out.get(k):
+            out[k] = str(out[k])
+    return out
+
+
 def get_pending(session_id: str) -> Optional[dict[str, Any]]:
     with get_connection() as conn:
         row = conn.execute(
@@ -19,17 +31,40 @@ def get_pending(session_id: str) -> Optional[dict[str, Any]]:
             """,
             (session_id,),
         ).fetchone()
-    if not row:
-        return None
-    out = dict(row)
-    if isinstance(out.get("state"), str):
-        out["state"] = json.loads(out["state"])
-    if isinstance(out.get("missing_fields"), str):
-        out["missing_fields"] = json.loads(out["missing_fields"])
-    for k in ("created_at", "updated_at"):
-        if out.get(k):
-            out[k] = str(out[k])
-    return out
+    return _row_to_checkpoint(row) if row else None
+
+
+def get_pending_email_grant(
+    user_id: str,
+    session_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Checkpoint email_watch đang chờ grant — ưu tiên đúng session."""
+    with get_connection() as conn:
+        if session_id:
+            row = conn.execute(
+                """
+                SELECT id, session_id, user_id, intent, state, missing_fields, status, created_at, updated_at
+                FROM hitl_checkpoints
+                WHERE user_id = %s AND session_id = %s AND status = 'interrupted'
+                  AND intent = 'email_watch'
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (user_id, session_id),
+            ).fetchone()
+            if row:
+                return _row_to_checkpoint(row)
+        row = conn.execute(
+            """
+            SELECT id, session_id, user_id, intent, state, missing_fields, status, created_at, updated_at
+            FROM hitl_checkpoints
+            WHERE user_id = %s AND status = 'interrupted' AND intent = 'email_watch'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+    return _row_to_checkpoint(row) if row else None
 
 
 def interrupt(

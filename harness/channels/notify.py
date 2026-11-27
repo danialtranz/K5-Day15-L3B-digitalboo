@@ -1,4 +1,4 @@
-"""Ghi notification vào Postgres + file outbox (MVP báo user)."""
+"""Ghi notification vào Postgres + file outbox (MVP báo user / desktop poll)."""
 from __future__ import annotations
 
 import json
@@ -41,16 +41,60 @@ def push(
     return {"id": row["id"], "path": str(path), "created_at": str(row["created_at"])}
 
 
-def list_notifications(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def list_notifications(
+    user_id: str,
+    limit: int = 50,
+    *,
+    unread_only: bool = False,
+    since_id: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    clauses = ["user_id = %s"]
+    params: list[Any] = [user_id]
+    if unread_only:
+        clauses.append("read_at IS NULL")
+    if since_id is not None:
+        clauses.append("id > %s")
+        params.append(since_id)
+    where = " AND ".join(clauses)
+    params.append(limit)
     with get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, kind, title, body, meta, created_at, read_at
             FROM notifications
-            WHERE user_id = %s
-            ORDER BY created_at DESC
+            WHERE {where}
+            ORDER BY id ASC
             LIMIT %s
             """,
-            (user_id, limit),
+            tuple(params),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def mark_read(notification_id: int, user_id: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE notifications
+            SET read_at = NOW()
+            WHERE id = %s AND user_id = %s
+            RETURNING id, kind, title, body, meta, created_at, read_at
+            """,
+            (notification_id, user_id),
+        ).fetchone()
+        conn.commit()
+    return dict(row) if row else None
+
+
+def mark_all_read(user_id: str) -> int:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE notifications
+            SET read_at = NOW()
+            WHERE user_id = %s AND read_at IS NULL
+            """,
+            (user_id,),
+        )
+        conn.commit()
+        return row.rowcount or 0

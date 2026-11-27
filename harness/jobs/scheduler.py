@@ -9,7 +9,7 @@ from harness.config import load_yaml, settings
 from harness.db.redis_client import acquire_lock, release_lock
 from harness.flows.email_watch import run_email_watch
 from harness.flows.standup_submit import run_standup_submit
-from harness.jobs.delayed import pop_due, schedule_job
+from harness.jobs.delayed import next_run_unix, pop_due, schedule_job
 
 _stop = threading.Event()
 _thread: Optional[threading.Thread] = None
@@ -32,14 +32,28 @@ def _run_delayed_jobs() -> None:
                     )
                 )
             elif jtype == "email_watch":
-                print(run_email_watch(uid))
-                interval = payload.get("notify_interval_sec")
-                if payload.get("repeat") and interval:
-                    schedule_job(
-                        "email_watch",
-                        payload,
-                        time.time() + int(interval),
+                state = dict(payload.get("state") or {})
+                # Đồng bộ repeat fields vào state nếu payload tách
+                for k in ("schedule_repeat", "schedule_weekday", "schedule_time", "schedule_date"):
+                    if payload.get(k) is not None and state.get(k) is None:
+                        state[k] = payload.get(k)
+                print(
+                    run_email_watch(
+                        uid,
+                        state=state,
+                        source="scheduled_email_watch",
                     )
+                )
+                # Reschedule
+                if payload.get("repeat") or (state.get("schedule_repeat") == "weekly"):
+                    # weekly calendar
+                    if (payload.get("schedule_repeat") or state.get("schedule_repeat")) == "weekly":
+                        nxt = next_run_unix(state, after_unix=time.time() + 1)
+                        if nxt:
+                            schedule_job("email_watch", payload, nxt)
+                    elif payload.get("notify_interval_sec"):
+                        interval = int(payload["notify_interval_sec"])
+                        schedule_job("email_watch", payload, time.time() + interval)
         except Exception as e:
             print("[scheduler] delayed job error:", e)
 
@@ -63,10 +77,11 @@ def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = No
                 release_lock("lock:sched:delayed")
 
         now = time.time()
-        if now - last_email >= email_every:
+        # Background email poll tắt khoảng rất lớn nếu không cần — giữ tương thích cũ
+        if email_every < 86400 * 365 and now - last_email >= email_every:
             if acquire_lock("lock:sched:email", ttl_sec=min(email_every, 120)):
                 try:
-                    print("[scheduler] background email…", run_email_watch())
+                    print("[scheduler] background email…", run_email_watch(source="background"))
                 except Exception as e:
                     print("[scheduler] email error:", e)
                 finally:
@@ -75,7 +90,6 @@ def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = No
 
         if once:
             break
-        # ngủ theo chunk ngắn để phản ứng stop nhanh
         for _ in range(5):
             if stop_event is not None and stop_event.is_set():
                 break

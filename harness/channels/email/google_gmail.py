@@ -78,14 +78,21 @@ class GmailProvider:
                 return None
             return r.json().get("email")
 
-    def list_messages(self, access_token: str, limit: int = 20) -> list[EmailMessage]:
+    def list_messages(
+        self,
+        access_token: str,
+        limit: int = 20,
+        query: str | None = None,
+    ) -> list[EmailMessage]:
+        """query: Gmail search string. Mặc định unread trong 7 ngày."""
+        q = (query or "").strip() or "is:unread newer_than:7d"
         headers = {"Authorization": f"Bearer {access_token}"}
         out: list[EmailMessage] = []
         with httpx.Client(timeout=60) as client:
             r = client.get(
                 f"{GMAIL_API}/users/me/messages",
                 headers=headers,
-                params={"maxResults": limit, "q": "is:unread newer_than:7d"},
+                params={"maxResults": limit, "q": q},
             )
             r.raise_for_status()
             ids = [m["id"] for m in (r.json().get("messages") or [])]

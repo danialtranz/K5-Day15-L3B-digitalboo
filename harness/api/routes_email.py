@@ -2,40 +2,62 @@
 from __future__ import annotations
 
 import json
-import secrets
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from harness.channels.email.google_gmail import GmailProvider
+from harness.channels.email.oauth import build_google_oauth_start, redirect_uri
 from harness.channels.email.token_store import delete_account, get_account, upsert_account
-from harness.channels.notify import list_notifications
+from harness.channels.notify import list_notifications, mark_all_read, mark_read
 from harness.config import settings
-from harness.db.redis_client import pop_oauth_state, set_oauth_state
+from harness.db.auth import append_chat
+from harness.db.redis_client import pop_oauth_state
 from harness.flows.email_watch import run_email_watch
+from harness.orchestrator import resume_email_after_oauth
 
 router = APIRouter(prefix="/email", tags=["email"])
 
 
-def _redirect_uri() -> str:
-    return f"{settings()['oauth_redirect_base'].rstrip('/')}/email/oauth/google/callback"
-
-
 @router.get("/oauth/google/start")
-def oauth_start(user_id: Optional[str] = None):
+def oauth_start(
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    checkpoint_id: Optional[int] = None,
+    format: Optional[str] = Query(None, description="json = trả oauth_url cho popup"),
+):
     s = settings()
-    if not s["google_client_id"] or not s["google_client_secret"]:
-        raise HTTPException(400, "Thiếu GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET trong .env")
     user_id = user_id or s["default_user_id"]
-    state = secrets.token_urlsafe(24)
-    set_oauth_state(state, json.dumps({"user_id": user_id}))
-    url = GmailProvider().connect_url(state, _redirect_uri())
-    return RedirectResponse(url)
+    try:
+        start = build_google_oauth_start(
+            user_id,
+            session_id=session_id,
+            checkpoint_id=checkpoint_id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    if (format or "").lower() == "json":
+        return JSONResponse(
+            {
+                "ok": True,
+                "popup": True,
+                "oauth_url": start["oauth_url"],
+                "user_id": user_id,
+                "session_id": session_id,
+                "checkpoint_id": checkpoint_id,
+            }
+        )
+    return RedirectResponse(start["oauth_url"])
 
 
 @router.get("/oauth/google/callback")
-def oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+def oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
     if error:
         raise HTTPException(400, f"OAuth error: {error}")
     if not code or not state:
@@ -45,19 +67,66 @@ def oauth_callback(code: Optional[str] = None, state: Optional[str] = None, erro
         raise HTTPException(400, "State không hợp lệ hoặc hết hạn")
     payload = json.loads(raw)
     user_id = payload.get("user_id") or settings()["default_user_id"]
+    session_id = payload.get("session_id")
+    checkpoint_id = payload.get("checkpoint_id")
+
     provider = GmailProvider()
-    bundle = provider.exchange_code(code, _redirect_uri())
+    bundle = provider.exchange_code(code, redirect_uri())
     email = provider.fetch_profile_email(bundle.access_token)
     bundle.email_address = email
     upsert_account(user_id, "google", bundle)
-    html = f"""
-    <html><body style="font-family:sans-serif;padding:2rem">
-      <h1>Gmail connected</h1>
-      <p>user_id=<b>{user_id}</b></p>
-      <p>email=<b>{email or 'unknown'}</b></p>
-      <p>Có thể đóng tab này. Gọi POST /email/watch để quét mail.</p>
-    </body></html>
-    """
+
+    # Auto-resume HITL email_watch → đọc mail quan trọng
+    resume = resume_email_after_oauth(
+        user_id=user_id,
+        session_id=session_id,
+        checkpoint_id=checkpoint_id,
+    )
+
+    # Ghi vào chat history nếu có session
+    if session_id:
+        try:
+            append_chat(
+                session_id,
+                user_id,
+                "assistant",
+                resume.get("message") or "Đã connect Gmail và quét mail.",
+                flow=resume.get("flow") or "email_watch",
+                meta={
+                    "ok": resume.get("ok"),
+                    "resumed_from_oauth": True,
+                    "important": resume.get("important"),
+                },
+            )
+        except Exception:
+            pass
+
+    resume_js = json.dumps(resume, ensure_ascii=False, default=str)
+    msg = resume.get("message") or "Gmail connected."
+    important = resume.get("important")
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Gmail connected</title></head>
+<body style="font-family:sans-serif;padding:2rem;max-width:40rem">
+  <h1>Gmail đã kết nối</h1>
+  <p>user_id=<b>{user_id}</b></p>
+  <p>email=<b>{email or "unknown"}</b></p>
+  <p>{msg}</p>
+  <p>{"Tin quan trọng: " + str(important) if important is not None else ""}</p>
+  <p><small>Có thể đóng cửa sổ này — agent đã tiếp tục đọc email.</small></p>
+  <script>
+    (function () {{
+      var payload = {resume_js};
+      payload.type = "gmail_oauth_done";
+      try {{
+        if (window.opener && !window.opener.closed) {{
+          window.opener.postMessage(payload, "*");
+        }}
+      }} catch (e) {{}}
+      setTimeout(function () {{ window.close(); }}, 1200);
+    }})();
+  </script>
+</body></html>
+"""
     return HTMLResponse(html)
 
 
@@ -90,13 +159,43 @@ def watch_now(user_id: Optional[str] = None):
 
 
 @router.get("/notifications")
-def notifications(user_id: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
+def notifications(
+    user_id: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    unread_only: bool = Query(False),
+    since_id: Optional[int] = Query(None, description="Chỉ lấy id > since_id (desktop poll)"),
+):
+    """Desktop app poll: ?unread_only=true hoặc ?since_id=N."""
     user_id = user_id or settings()["default_user_id"]
-    rows = list_notifications(user_id, limit=limit)
-    # Không lộ meta nhạy cảm quá mức; giữ nguyên MVP
+    rows = list_notifications(
+        user_id,
+        limit=limit,
+        unread_only=unread_only,
+        since_id=since_id,
+    )
     for r in rows:
         if r.get("created_at"):
             r["created_at"] = str(r["created_at"])
         if r.get("read_at"):
             r["read_at"] = str(r["read_at"])
-    return {"items": rows}
+    return {"items": rows, "user_id": user_id}
+
+
+@router.post("/notifications/{notification_id}/read")
+def notification_read(notification_id: int, user_id: Optional[str] = None):
+    user_id = user_id or settings()["default_user_id"]
+    row = mark_read(notification_id, user_id)
+    if not row:
+        raise HTTPException(404, "Notification không tồn tại")
+    if row.get("created_at"):
+        row["created_at"] = str(row["created_at"])
+    if row.get("read_at"):
+        row["read_at"] = str(row["read_at"])
+    return {"ok": True, "item": row}
+
+
+@router.post("/notifications/read-all")
+def notifications_read_all(user_id: Optional[str] = None):
+    user_id = user_id or settings()["default_user_id"]
+    n = mark_all_read(user_id)
+    return {"ok": True, "marked": n, "user_id": user_id}

@@ -13,14 +13,17 @@ from harness.flows.email_watch import run_email_watch
 from harness.flows.standup_submit import run_standup_submit
 from harness.hitl import checkpoint as cp
 from harness.hitl.slots import (
-    ask_message,
+    compose_hitl_message,
+    compose_schedule_confirm,
     email_missing,
     extract_email_slots,
     extract_standup_slots,
     merge_slots,
     standup_missing,
+    wants_run_now,
+    wants_schedule,
 )
-from harness.jobs.delayed import parse_schedule_at, schedule_job
+from harness.jobs.delayed import next_run_unix, parse_schedule_at, schedule_job
 from harness.memory import format_chat_history, with_history
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -150,7 +153,60 @@ def _execute_standup(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _execute_email(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
-    interval = state.get("notify_interval_sec")
+    from harness.hitl.slots import build_gmail_query
+
+    clean = {k: v for k, v in state.items() if not str(k).startswith("_")}
+    q = build_gmail_query(clean)
+    watch_result: dict[str, Any] | None = None
+
+    # 1) Chạy ngay nếu cần
+    if wants_run_now(clean):
+        watch_result = run_email_watch(user_id, state=clean, query=q, source="ask_now")
+
+    # 2) Đặt lịch calendar (once/weekly) nếu có
+    if wants_schedule(clean):
+        run_at = next_run_unix(clean)
+        if run_at is None:
+            return {
+                "ok": False,
+                "flow": "email_watch",
+                "scheduled": False,
+                "message": "Chưa tính được thời điểm chạy lịch. Bạn cho mình giờ/ngày rõ hơn nhé.",
+                "query": q,
+                "watch": watch_result,
+            }
+        repeat = (clean.get("schedule_repeat") or "once").strip()
+        payload = {
+            "user_id": user_id,
+            "state": clean,
+            "repeat": repeat == "weekly",
+            "schedule_repeat": repeat,
+            "schedule_weekday": clean.get("schedule_weekday"),
+            "schedule_time": clean.get("schedule_time"),
+            "schedule_date": clean.get("schedule_date"),
+        }
+        job_id = schedule_job("email_watch", payload, run_at)
+        confirm = compose_schedule_confirm(state=clean, run_at_unix=run_at, watch_result=watch_result)
+        out: dict[str, Any] = {
+            "ok": True,
+            "flow": "email_watch",
+            "scheduled": True,
+            "job_id": job_id,
+            "run_at_unix": run_at,
+            "schedule_repeat": repeat,
+            "query": q,
+            "message": confirm.get("text") or "",
+            "watch": watch_result,
+            "items": (watch_result or {}).get("items") or [],
+        }
+        if confirm.get("_tokens_in"):
+            out["tokens_in"] = confirm.get("_tokens_in")
+        if confirm.get("_tokens_out"):
+            out["tokens_out"] = confirm.get("_tokens_out")
+        return out
+
+    # 3) Legacy: notify_interval_sec lặp theo giây (giữ tương thích)
+    interval = clean.get("notify_interval_sec")
     if interval:
         try:
             interval = int(interval)
@@ -161,30 +217,72 @@ def _execute_email(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
 
         job_id = schedule_job(
             "email_watch",
-            {"user_id": user_id, "notify_interval_sec": interval, "repeat": True},
+            {
+                "user_id": user_id,
+                "notify_interval_sec": interval,
+                "repeat": True,
+                "state": clean,
+            },
             time.time() + interval,
         )
-        result = run_email_watch(user_id)
+        if watch_result is None:
+            watch_result = run_email_watch(user_id, state=clean, query=q, source="ask_now")
         return {
             "ok": True,
             "flow": "email_watch",
             "scheduled": True,
             "job_id": job_id,
-            "message": (
-                f"Đã quét mail lần đầu. Đã lên lịch Redis lặp mỗi {interval}s (job_id={job_id}). "
-                f"{result.get('message') or ''}"
-            ),
-            "watch": result,
+            "query": q,
+            "message": watch_result.get("message") or "",
+            "watch": watch_result,
+            "items": watch_result.get("items") or [],
         }
 
-    result = run_email_watch(user_id)
+    if watch_result is None:
+        watch_result = run_email_watch(user_id, state=clean, query=q, source="ask_now")
     return {
-        "ok": result.get("ok", False),
+        "ok": watch_result.get("ok", False),
         "flow": "email_watch",
         "scheduled": False,
-        "message": result.get("message") or result.get("error") or "",
-        **result,
+        "message": watch_result.get("message") or watch_result.get("error") or "",
+        **watch_result,
     }
+
+
+def _email_connect_actions(
+    user_id: str,
+    session_id: str,
+    checkpoint_id: Optional[int],
+) -> list[dict[str, Any]]:
+    """Payload để UI hiện nút Connect Gmail (popup)."""
+    from harness.channels.email.oauth import build_google_oauth_start
+
+    try:
+        start = build_google_oauth_start(
+            user_id,
+            session_id=session_id,
+            checkpoint_id=checkpoint_id,
+        )
+    except ValueError as e:
+        return [
+            {
+                "type": "oauth_google",
+                "label": "Connect Gmail",
+                "error": str(e),
+            }
+        ]
+    return [
+        {
+            "type": "oauth_google",
+            "label": "Connect Gmail",
+            "oauth_url": start["oauth_url"],
+            "popup": True,
+            "user_id": user_id,
+            "session_id": session_id,
+            "checkpoint_id": checkpoint_id,
+            "start_api": f"/email/oauth/google/start?format=json&user_id={user_id}&session_id={session_id}",
+        }
+    ]
 
 
 def _hitl_interrupt(
@@ -194,10 +292,20 @@ def _hitl_interrupt(
     state: dict[str, Any],
     missing: list[str],
     meta: dict[str, Any],
+    *,
+    user_text: str = "",
+    history_text: str = "",
 ) -> dict[str, Any]:
     clean = {k: v for k, v in state.items() if not str(k).startswith("_")}
     saved = cp.interrupt(session_id, user_id, intent, clean, missing)
-    return {
+    msg = compose_hitl_message(
+        intent=intent,
+        missing=missing,
+        user_text=user_text,
+        history_text=history_text,
+        state=clean,
+    )
+    out: dict[str, Any] = {
         "ok": False,
         "flow": "hitl",
         "hitl": True,
@@ -206,9 +314,48 @@ def _hitl_interrupt(
         "missing_fields": missing,
         "state": clean,
         "checkpoint_id": saved.get("id"),
-        "message": ask_message(missing, intent),
+        "message": msg.get("text") or "",
         **meta,
     }
+    # gộp token của lần viết message
+    if msg.get("_tokens_in"):
+        out["tokens_in"] = (out.get("tokens_in") or 0) + (msg.get("_tokens_in") or 0)
+    if msg.get("_tokens_out"):
+        out["tokens_out"] = (out.get("tokens_out") or 0) + (msg.get("_tokens_out") or 0)
+    if "email_grant" in missing:
+        out["actions"] = _email_connect_actions(user_id, session_id, saved.get("id"))
+        out["ui"] = {
+            "show_connect_email": True,
+            "provider": "google",
+        }
+    return out
+
+
+def resume_email_after_oauth(
+    user_id: str,
+    session_id: Optional[str] = None,
+    checkpoint_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """Sau OAuth thành công: đóng HITL email_grant và chạy đọc mail."""
+    pending = None
+    if session_id:
+        pending = cp.get_pending(session_id)
+    if not pending or pending.get("intent") != "email_watch":
+        pending = cp.get_pending_email_grant(user_id, session_id=session_id)
+    if not pending:
+        out = _execute_email(user_id, {})
+        out["resumed_from_oauth"] = False
+        return out
+
+    state = dict(pending.get("state") or {})
+    cp.complete(pending["id"], state)
+    out = _execute_email(user_id, state)
+    out["resumed_from_oauth"] = True
+    out["checkpoint_id"] = pending["id"]
+    out["session_id"] = pending.get("session_id")
+    out["hitl"] = False
+    out["status"] = "completed"
+    return out
 
 
 def _resume_hitl(
@@ -222,17 +369,22 @@ def _resume_hitl(
     state = dict(pending.get("state") or {})
     missing = list(pending.get("missing_fields") or [])
 
-    low = text.lower()
-    if intent == "email_watch" and ("bỏ qua grant" in low or "bo qua grant" in low or "skip grant" in low):
-        state["skip_grant"] = True
-
     merged = merge_slots(intent, state, text, missing, history_text=history_text)
+    merged.pop("skip_grant", None)
     meta = _meta_from(merged, intent_reason="hitl_resume", resumed=True)
 
     if intent == "standup_fill":
         miss = standup_missing(merged)
         if miss:
-            cp.update_pending(pending["id"], {k: v for k, v in merged.items() if not str(k).startswith("_")}, miss)
+            clean = {k: v for k, v in merged.items() if not str(k).startswith("_")}
+            cp.update_pending(pending["id"], clean, miss)
+            msg = compose_hitl_message(
+                intent=intent,
+                missing=miss,
+                user_text=text,
+                history_text=history_text,
+                state=clean,
+            )
             return {
                 "ok": False,
                 "flow": "hitl",
@@ -240,9 +392,9 @@ def _resume_hitl(
                 "status": "interrupted",
                 "intent": intent,
                 "missing_fields": miss,
-                "state": {k: v for k, v in merged.items() if not str(k).startswith("_")},
+                "state": clean,
                 "checkpoint_id": pending["id"],
-                "message": ask_message(miss, intent),
+                "message": msg.get("text") or "",
                 **meta,
             }
         cp.complete(pending["id"], {k: v for k, v in merged.items() if not str(k).startswith("_")})
@@ -254,19 +406,31 @@ def _resume_hitl(
         has_grant = bool(get_account(user_id, "google"))
         miss = email_missing(merged, has_grant=has_grant)
         if miss:
-            cp.update_pending(pending["id"], {k: v for k, v in merged.items() if not str(k).startswith("_")}, miss)
-            return {
+            clean = {k: v for k, v in merged.items() if not str(k).startswith("_")}
+            cp.update_pending(pending["id"], clean, miss)
+            msg = compose_hitl_message(
+                intent=intent,
+                missing=miss,
+                user_text=text,
+                history_text=history_text,
+                state=clean,
+            )
+            out = {
                 "ok": False,
                 "flow": "hitl",
                 "hitl": True,
                 "status": "interrupted",
                 "intent": intent,
                 "missing_fields": miss,
-                "state": {k: v for k, v in merged.items() if not str(k).startswith("_")},
+                "state": clean,
                 "checkpoint_id": pending["id"],
-                "message": ask_message(miss, intent),
+                "message": msg.get("text") or "",
                 **meta,
             }
+            if "email_grant" in miss:
+                out["actions"] = _email_connect_actions(user_id, session_id, pending["id"])
+                out["ui"] = {"show_connect_email": True, "provider": "google"}
+            return out
         cp.complete(pending["id"], {k: v for k, v in merged.items() if not str(k).startswith("_")})
         out = _execute_email(user_id, merged)
         out.update(meta)
@@ -287,7 +451,16 @@ def _start_standup(
     meta = {**meta, **_meta_from(slots)}
     miss = standup_missing(slots)
     if miss:
-        return _hitl_interrupt(session_id, user_id, "standup_fill", slots, miss, meta)
+        return _hitl_interrupt(
+            session_id,
+            user_id,
+            "standup_fill",
+            slots,
+            miss,
+            meta,
+            user_text=text,
+            history_text=history_text,
+        )
     return {**_execute_standup(user_id, slots), **meta}
 
 
@@ -303,7 +476,16 @@ def _start_email(
     has_grant = bool(get_account(user_id, "google"))
     miss = email_missing(slots, has_grant=has_grant)
     if miss:
-        return _hitl_interrupt(session_id, user_id, "email_watch", slots, miss, meta)
+        return _hitl_interrupt(
+            session_id,
+            user_id,
+            "email_watch",
+            slots,
+            miss,
+            meta,
+            user_text=text,
+            history_text=history_text,
+        )
     return {**_execute_email(user_id, slots), **meta}
 
 
