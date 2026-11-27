@@ -11,13 +11,18 @@ from harness.api.routes_email import router as email_router
 from harness.api.routes_standup import router as standup_router
 from harness.config import ensure_dirs, settings
 from harness.db.session import init_db
+from harness.jobs.scheduler import start_background_scheduler, stop_background_scheduler
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ensure_dirs()
     init_db()
-    yield
+    start_background_scheduler()
+    try:
+        yield
+    finally:
+        stop_background_scheduler()
 
 
 app = FastAPI(
@@ -39,4 +44,5 @@ def health():
         "ok": True,
         "gmail_configured": bool(s["google_client_id"] and s["google_client_secret"]),
         "standup_allowlist": s["standup_allowlist_url"],
+        "scheduler": "embedded",
     }
