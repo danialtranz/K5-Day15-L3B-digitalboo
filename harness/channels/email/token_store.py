@@ -1,11 +1,12 @@
-"""Lưu / đọc OAuth token Gmail trong Postgres."""
+"""Lưu / đọc OAuth token Gmail & Outlook trong Postgres."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from harness.channels.email.base import TokenBundle
 from harness.channels.email.google_gmail import GmailProvider
+from harness.channels.email.outlook_msgraph import OutlookProvider
 from harness.db.session import get_connection
 
 
@@ -64,14 +65,17 @@ def get_valid_access_token(user_id: str, provider: str = "google") -> Optional[s
     now = datetime.now(timezone.utc)
     if expires is not None and getattr(expires, "tzinfo", None) is None:
         expires = expires.replace(tzinfo=timezone.utc)
-    if expires and expires > now + __import__("datetime").timedelta(seconds=60):
+    if expires and expires > now + timedelta(seconds=60):
         return row["access_token"]
     refresh = row.get("refresh_token")
     if not refresh:
         return row["access_token"]
-    if provider != "google":
+    if provider == "google":
+        bundle = GmailProvider().refresh(refresh)
+    elif provider == "outlook":
+        bundle = OutlookProvider().refresh(refresh)
+    else:
         return None
-    bundle = GmailProvider().refresh(refresh)
     bundle.email_address = row.get("email_address")
     upsert_account(user_id, provider, bundle)
     return bundle.access_token

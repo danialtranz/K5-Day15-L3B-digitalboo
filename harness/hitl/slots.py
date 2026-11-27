@@ -35,6 +35,7 @@ Giải thích standup:
 - run_now: true chỉ khi user muốn điền ngay bây giờ; nếu chỉ hẹn lịch thì false hoặc null.
 Với intent email_watch, schema:
 {
+  "email_provider": "google"|"outlook"|null,
   "notify_interval_sec": number|null,
   "newer_than_days": number|null,
   "after_date": string|null,
@@ -50,8 +51,9 @@ Với intent email_watch, schema:
   "schedule_repeat": "once"|"weekly"|null
 }
 Giải thích email:
+- email_provider: "outlook" nếu user nói Outlook/Hotmail/Microsoft/Office 365; "google" nếu Gmail/Google; null nếu không chỉ định (hệ thống dùng tài khoản đã kết nối).
 - newer_than_days / after_date / before_date / include_read: khung quét mail (null newer_than → hệ thống mặc định 7 ngày).
-- search_query: chuỗi tìm Gmail khi user hỏi chủ đề cụ thể (vd «đăng ký nhập học», «hóa đơn»). Viết keyword/OR tiếng Việt+Anh, không bọc ngoặc thừa; null nếu chỉ «đọc mail quan trọng / kiểm tra hộp thư».
+- search_query: chuỗi tìm khi user hỏi chủ đề cụ thể (vd «đăng ký nhập học», «hóa đơn»). Viết keyword/OR tiếng Việt+Anh, không bọc ngoặc thừa; null nếu chỉ «đọc mail quan trọng / kiểm tra hộp thư».
 - topic: mô tả ngắn chủ đề user hỏi (tiếng Việt), null nếu quét chung.
 - include_read: true nếu user hỏi về một chủ đề cụ thể (có thể đã đọc); false/null nếu chỉ quét unread.
 - run_now: true nếu user muốn kiểm tra email ngay trong lượt này.
@@ -74,7 +76,7 @@ HITL_MESSAGE_SYSTEM = """Bạn là trợ lý digitalboo, nói chuyện tự nhi�
 Nhiệm vụ: viết ĐÚNG một tin nhắn ngắn (1–3 câu) giải thích cần gì tiếp theo, thân thiện, rõ ràng.
 Được dùng Markdown nhẹ (in đậm, list) khi giúp đọc rõ hơn — không bọc cả tin trong code fence.
 TUYỆT ĐỐI KHÔNG dùng jargon kỹ thuật: không nói HITL, checkpoint, missing_fields, grant, OAuth, API, actions, Redis, cron.
-Nếu thiếu kết nối Gmail: mời người dùng bấm nút kết nối Gmail trên giao diện (nút sẽ hiện sẵn) — KHÔNG nói có thể bỏ qua.
+Nếu thiếu kết nối email: mời người dùng bấm nút kết nối Gmail hoặc Outlook trên giao diện (nút sẽ hiện sẵn) — KHÔNG nói có thể bỏ qua.
 Nếu thiếu lịch (giờ / thứ trong tuần / ngày): hỏi tự nhiên phần còn thiếu để hẹn giờ.
 Nếu thiếu thông tin standup (hôm qua / hôm nay / URL): hỏi tự nhiên những phần còn thiếu.
 Nếu still_needed có browser_login: bảo người dùng đăng nhập trên cửa sổ trình duyệt vừa mở (GitHub/Google/portal), xong thì nhắn lại (vd «đã đăng nhập») để mình tiếp tục điền form. Không yêu cầu gửi mật khẩu trong chat.
@@ -87,14 +89,15 @@ Không jargon (không nói Redis, cron, job_id, unix). Nêu rõ việc gì (đ�
 Nhắc nhẹ: đến giờ hệ thống mới chạy; kết quả (thành công/thất bại) sẽ báo qua thông báo desktop.
 Nếu đồng thời đã chạy ngay, nhắc ngắn kết quả. Chỉ trả về nội dung tin nhắn."""
 
-EMAIL_WATCH_REPLY_SYSTEM = """Bạn là trợ lý digitalboo. Nhiệm vụ: viết tin nhắn trả lời user SAU KHI đã chạy tool đọc Gmail.
+EMAIL_WATCH_REPLY_SYSTEM = """Bạn là trợ lý digitalboo. Nhiệm vụ: viết tin nhắn trả lời user SAU KHI đã chạy tool đọc email (Gmail hoặc Outlook).
 Chỉ dựa trên tool_result (digest mail thật). Không bịa mail, người gửi, hay nội dung không có trong dữ liệu.
 Trả lời đúng câu hỏi user:
 - Nếu hỏi về chủ đề cụ thể (topic/search): nói rõ CÓ / KHÔNG thấy mail khớp; nếu có thì nêu 1–3 thư liên quan (người gửi + tiêu đề + ý ngắn).
 - Nếu quét chung / mail quan trọng: tóm tắt những thư quan trọng hoặc đáng chú ý; bỏ qua spam/promo ồn ào trừ khi user hỏi sale.
 - Nếu hộp thư toàn promo và không khớp chủ đề: nói thẳng không thấy tin liên quan, có thể nhắc ngắn đang thấy chủ yếu quảng cáo.
+- Có thể nhắc nhẹ nguồn (Gmail / Outlook) nếu tool_result.provider có.
 Giọng tiếng Việt tự nhiên, 2–8 câu hoặc list ngắn. Markdown nhẹ (in đậm, list) OK.
-Không jargon (không nói heuristic, keyword rule, query Gmail, already_seen, digest).
+Không jargon (không nói heuristic, keyword rule, query, already_seen, digest, Graph API).
 Không dump nguyên danh sách 20 mail promo. Không mở đầu kiểu "Đã quét N mail (query: …)".
 Chỉ trả về nội dung tin nhắn, không JSON, không markdown fence."""
 
@@ -252,7 +255,18 @@ def extract_email_slots(text: str, history_text: str = "") -> dict[str, Any]:
         else:
             repeat = "once"
 
+    provider = _str_or_none(data.get("email_provider"))
+    if provider:
+        provider = provider.strip().lower()
+        if provider in ("gmail", "google"):
+            provider = "google"
+        elif provider in ("outlook", "microsoft", "hotmail", "live", "office365", "o365"):
+            provider = "outlook"
+        else:
+            provider = None
+
     return {
+        "email_provider": provider,
         "notify_interval_sec": interval,
         "newer_than_days": days,
         "after_date": _str_or_none(data.get("after_date")),
@@ -304,6 +318,26 @@ def build_gmail_query(state: dict[str, Any] | None = None) -> str:
     return " ".join(parts)
 
 
+def build_outlook_query(state: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Tham số list Outlook/Graph từ slot (không phải Gmail q)."""
+    state = state or {}
+    days = state.get("newer_than_days")
+    try:
+        days = int(days) if days is not None else 7
+    except (TypeError, ValueError):
+        days = 7
+    if days < 1:
+        days = 1
+    search = _str_or_none(state.get("search_query"))
+    return {
+        "search": search,
+        "unread_only": not bool(state.get("include_read")),
+        "newer_than_days": days,
+        "after_date": _str_or_none(state.get("after_date")),
+        "before_date": _str_or_none(state.get("before_date")),
+    }
+
+
 def merge_slots(
     intent: str,
     state: dict[str, Any],
@@ -345,6 +379,17 @@ def merge_slots(
         merged["schedule_enabled"] = bool(merged.get("schedule_enabled"))
     if "run_now" in merged and merged.get("run_now") is not None:
         merged["run_now"] = bool(merged.get("run_now"))
+    if "email_provider" in merged:
+        ep = _str_or_none(merged.get("email_provider"))
+        if ep:
+            ep = ep.strip().lower()
+            if ep in ("gmail", "google"):
+                ep = "google"
+            elif ep in ("outlook", "microsoft", "hotmail", "live", "office365", "o365"):
+                ep = "outlook"
+            else:
+                ep = None
+        merged["email_provider"] = ep
     merged["_model"] = data.get("_model")
     merged["_tokens_in"] = data.get("_tokens_in")
     merged["_tokens_out"] = data.get("_tokens_out")
@@ -492,7 +537,10 @@ def compose_hitl_message(
                 "Bạn đăng nhập giúp mình trên cửa sổ đó, xong nhắn «đã đăng nhập» để mình điền standup tiếp nhé."
             )
         elif "email_grant" in missing:
-            text = "Để mình đọc hộp thư giúp bạn, hãy kết nối Gmail bằng nút trên màn hình nhé."
+            text = (
+                "Để mình đọc hộp thư giúp bạn, hãy kết nối Gmail hoặc Outlook "
+                "bằng nút trên màn hình nhé."
+            )
         elif any(x.startswith("schedule_") for x in missing):
             text = "Bạn cho mình biết rõ giờ (và thứ/ngày) muốn mình kiểm tra email giúp bạn nhé."
         elif "yesterday" in missing or "today" in missing:

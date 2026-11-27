@@ -1,4 +1,4 @@
-"""Hợp đồng EmailProvider — MVP chỉ Gmail; sẵn chỗ cho Outlook sau."""
+"""Hợp đồng EmailProvider — Gmail + Outlook (Microsoft Graph)."""
 from __future__ import annotations
 
 from dataclasses import dataclass

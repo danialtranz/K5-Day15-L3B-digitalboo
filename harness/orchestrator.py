@@ -24,7 +24,8 @@ from harness.hitl.slots import (
     wants_schedule,
 )
 from harness.jobs.delayed import next_run_unix, parse_schedule_at, schedule_job
-from harness.memory import format_chat_history, with_history
+from harness import mem0_store
+from harness.memory import format_chat_history, format_longterm, with_history
 from harness.channels import notify as notify_mod
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,12 +64,22 @@ def _extract_json(text: str) -> dict[str, Any]:
     return data
 
 
-def detect_intent(text: str, user_id: str, history_text: str = "") -> dict[str, Any]:
+def detect_intent(
+    text: str,
+    user_id: str,
+    history_text: str = "",
+    longterm_text: str = "",
+) -> dict[str, Any]:
     from ai import call_model  # type: ignore
 
     reply = call_model(
         INTENT_SYSTEM,
-        with_history(history_text, text, extra=f"user_id={user_id}"),
+        with_history(
+            history_text,
+            text,
+            extra=f"user_id={user_id}",
+            longterm_text=longterm_text,
+        ),
     )
     parsed = _extract_json(reply.get("text") or "")
     intent = str(parsed.get("intent") or "conversation").strip()
@@ -92,17 +103,25 @@ def _meta_from(obj: dict[str, Any], **extra: Any) -> dict[str, Any]:
     }
 
 
-def _conversation(text: str, history_text: str = "") -> dict[str, Any]:
+def _conversation(
+    text: str,
+    history_text: str = "",
+    longterm_text: str = "",
+) -> dict[str, Any]:
     from ai import call_model  # type: ignore
 
     system = (
         "Bạn là trợ lý digitalboo thân thiện. "
-        "Nhớ ngữ cảnh từ lịch sử hội thoại cùng session. "
+        "Nhớ ngữ cảnh từ lịch sử hội thoại cùng session và ghi nhớ dài hạn (Mem0) nếu có. "
+        "Dùng fact dài hạn khi phù hợp (sở thích, giờ standup, URL thường dùng) — không bịa thêm. "
         "Trả lời tiếng Việt, ngắn gọn. "
         "Được dùng Markdown (in đậm, list, code inline) khi giúp đọc rõ — không bọc cả câu trả lời trong fence. "
         "Không soạn standup, không đọc email trừ khi user yêu cầu rõ trong tin hiện tại."
     )
-    reply = call_model(system, with_history(history_text, text))
+    reply = call_model(
+        system,
+        with_history(history_text, text, longterm_text=longterm_text),
+    )
     return {
         "ok": True,
         "flow": "conversation",
@@ -111,6 +130,30 @@ def _conversation(text: str, history_text: str = "") -> dict[str, Any]:
         "tokens_in": reply.get("tokens_in"),
         "tokens_out": reply.get("tokens_out"),
     }
+
+
+def _persist_longterm(
+    user_id: str,
+    user_text: str,
+    result: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> None:
+    """Ghi cặp user/assistant vào Mem0 (best-effort)."""
+    if not mem0_store.enabled():
+        return
+    assistant = result.get("message") or result.get("error") or ""
+    if not isinstance(assistant, str):
+        assistant = str(assistant)
+    # Bỏ qua lỗi kỹ thuật không có nội dung hữu ích
+    if result.get("flow") == "intent_error":
+        return
+    mem0_store.add_exchange(
+        user_id=user_id,
+        user_text=user_text,
+        assistant_text=assistant,
+        session_id=session_id,
+    )
 
 
 def _standup_min_chars(url: str | None = None) -> int | None:
@@ -798,44 +841,82 @@ def handle(
     session_id = session_id or f"anon-{user_id}"
     history_text = format_chat_history(history or [])
 
+    # Long-term Mem0: search trước khi gọi LLM (theo user_id, qua session)
+    lt_facts = mem0_store.search_memories(text, user_id=user_id)
+    longterm_text = format_longterm(lt_facts)
+    # Prefill vào history_text để HITL / extract slot cũng thấy fact dài hạn
+    history_for_llm = (
+        f"{longterm_text}\n\n{history_text}" if longterm_text else history_text
+    )
+
     pending = cp.get_pending(session_id)
     if pending:
-        result = _resume_hitl(text, user_id, session_id, pending, history_text=history_text)
+        result = _resume_hitl(
+            text, user_id, session_id, pending, history_text=history_for_llm
+        )
         result["source"] = source
         result["history_turns"] = len(history or [])
+        result["mem0_hits"] = len(lt_facts)
+        _persist_longterm(user_id, text, result, session_id=session_id)
         return result
 
     try:
-        detected = detect_intent(text, user_id, history_text=history_text)
+        detected = detect_intent(
+            text,
+            user_id,
+            history_text=history_text,
+            longterm_text=longterm_text,
+        )
     except Exception as e:
         return {
             "ok": False,
             "flow": "intent_error",
             "source": source,
             "message": f"Không phân loại được intent bằng LLM: {e}",
+            "mem0_hits": len(lt_facts),
         }
 
     intent = detected["intent"]
     meta = _meta_from(detected, intent_reason=detected.get("reason"), intent=intent)
     meta["source"] = source
     meta["history_turns"] = len(history or [])
+    meta["mem0_hits"] = len(lt_facts)
 
     if intent == "conversation":
-        out = _conversation(text, history_text=history_text)
+        out = _conversation(
+            text,
+            history_text=history_text,
+            longterm_text=longterm_text,
+        )
         out.update({k: v for k, v in meta.items() if k not in out or out.get(k) is None})
         out["source"] = source
+        _persist_longterm(user_id, text, out, session_id=session_id)
         return out
 
     if intent == "standup_fill":
-        out = _start_standup(text, user_id, session_id, meta, history_text=history_text)
+        out = _start_standup(
+            text, user_id, session_id, meta, history_text=history_for_llm
+        )
         out["source"] = source
+        out["mem0_hits"] = len(lt_facts)
+        _persist_longterm(user_id, text, out, session_id=session_id)
         return out
 
     if intent == "email_watch":
-        out = _start_email(text, user_id, session_id, meta, history_text=history_text)
+        out = _start_email(
+            text, user_id, session_id, meta, history_text=history_for_llm
+        )
         out["source"] = source
+        out["mem0_hits"] = len(lt_facts)
+        _persist_longterm(user_id, text, out, session_id=session_id)
         return out
 
-    out = _conversation(text, history_text=history_text)
+    out = _conversation(
+        text,
+        history_text=history_text,
+        longterm_text=longterm_text,
+    )
     out["source"] = source
+    out["mem0_hits"] = len(lt_facts)
+    _persist_longterm(user_id, text, out, session_id=session_id)
     return out

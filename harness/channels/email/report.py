@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from harness.channels.email.google_gmail import GmailProvider
+from harness.channels.email.outlook_msgraph import OutlookProvider
 from harness.channels.email.token_store import get_account, get_valid_access_token
 
 
@@ -186,17 +187,21 @@ def send_job_result_email(
     source: str = "scheduler",
 ) -> dict[str, Any]:
     """
-    Gửi mail báo cáo về địa chỉ Gmail đã OAuth của user.
+    Gửi mail báo cáo về hộp thư đã OAuth (ưu tiên Gmail, fallback Outlook).
     Không ném exception ra ngoài — trả {ok, ...} để caller log.
     """
+    provider = "google"
     account = get_account(user_id, "google")
     if not account:
-        return {"ok": False, "error": "gmail_not_connected"}
+        provider = "outlook"
+        account = get_account(user_id, "outlook")
+    if not account:
+        return {"ok": False, "error": "email_not_connected"}
     to = (account.get("email_address") or "").strip()
     if not to:
         return {"ok": False, "error": "missing_email_address"}
 
-    token = get_valid_access_token(user_id, "google")
+    token = get_valid_access_token(user_id, provider)
     if not token:
         return {"ok": False, "error": "no_access_token"}
 
@@ -209,24 +214,48 @@ def send_job_result_email(
         source=source,
     )
     try:
-        sent = GmailProvider().send_message(
-            token,
-            to=to,
-            subject=subject,
-            body_text=body_text,
-            body_html=body_html,
-            from_addr=to,
-        )
+        if provider == "outlook":
+            sent = OutlookProvider().send_message(
+                token,
+                to=to,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                from_addr=to,
+            )
+            message_id = sent.get("id") or sent.get("status_code")
+        else:
+            sent = GmailProvider().send_message(
+                token,
+                to=to,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                from_addr=to,
+            )
+            message_id = sent.get("id")
         return {
             "ok": True,
+            "provider": provider,
             "to": to,
             "subject": subject,
-            "message_id": sent.get("id"),
+            "message_id": message_id,
         }
     except Exception as e:
         err = str(e)
         hint = None
         if "403" in err or "insufficient" in err.lower() or "Insufficient Permission" in err:
-            hint = "Cần reconnect Gmail để cấp quyền gmail.send."
+            hint = (
+                "Cần reconnect Outlook (Mail.Send)."
+                if provider == "outlook"
+                else "Cần reconnect Gmail để cấp quyền gmail.send."
+            )
         print(f"[email-report] send failed for {user_id}: {err}" + (f" ({hint})" if hint else ""))
-        return {"ok": False, "error": err, "hint": hint, "to": to, "subject": subject}
+        return {
+            "ok": False,
+            "error": err,
+            "hint": hint,
+            "to": to,
+            "subject": subject,
+            "provider": provider,
+        }
