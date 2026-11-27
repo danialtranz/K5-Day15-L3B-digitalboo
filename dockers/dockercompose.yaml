@@ -1,0 +1,43 @@
+# Chỉ 2 service data. FastAPI/Playwright chạy trên host.
+# Port host: non-default + bind 127.0.0.1 (không expose LAN).
+#
+# Chạy từ thư mục dockers/:
+#   docker compose -f dockercompose.yaml --env-file ../.env up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: digitalboo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-digitalboo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-digitalboo}
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - digitalboo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-digitalboo} -d ${POSTGRES_DB:-digitalboo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: digitalboo-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-16379}:6379"
+    volumes:
+      - digitalboo_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  digitalboo_pgdata:
+  digitalboo_redisdata:

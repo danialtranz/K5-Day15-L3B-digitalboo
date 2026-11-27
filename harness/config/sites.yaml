@@ -1,0 +1,21 @@
+# Allowlist standup — chỉ host/path này được computer-use.
+standup:
+  site_id: daily_standup
+  # URL thật ghi vào .env STANDUP_ALLOWLIST_URL; file này bổ sung selector.
+  url_env: STANDUP_ALLOWLIST_URL
+  login_url_patterns:
+    - "/login"
+    - "/signin"
+    - "accounts.google.com"
+  fields:
+    yesterday:
+      selector: "textarea[name='yesterday'], #yesterday, [data-field='yesterday']"
+    today:
+      selector: "textarea[name='today'], #today, [data-field='today']"
+    blockers:
+      selector: "textarea[name='blockers'], #blockers, [data-field='blockers']"
+  submit_selector: "button[type='submit'], button:has-text('Submit'), button:has-text('Nộp')"
+  success_patterns:
+    - "submitted"
+    - "đã nộp"
+    - "success"
