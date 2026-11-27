@@ -1,4 +1,4 @@
-# AI SPEC — Nhắc + draft daily standup từ ghi chú · Nhóm digitalboo · Phòng ___ · Zone ___
+# AI SPEC — Daily standup: HITL slot + computer-use điền form · Nhóm digitalboo · Phòng ___ · Zone ___
 
 > Mốc: §7 chốt chuẩn "đạt" tại **CP2 19:30 Thứ Sáu 27/11** · §0–§7 **CP3** · đủ **CP4**.
 
@@ -20,63 +20,86 @@ Data BTC cấp đã dùng: không (Track F)
 
 | Hướng | Bao nhiêu người gặp | Bao nhiêu lần / tháng | Mỗi lần tốn gì | Impact / tháng | Làm kịp không | Chọn? |
 |---|---|---|---|---|---|---|
-| Nhắc + soạn draft từ ghi chú, user duyệt rồi tự nộp | ≥1 (P1); ước team nhỏ 5–15 *(tự ước tính)* | ~20–30 lần / người / tháng (mỗi sáng kể cả CN) *(tự ước tính từ P1)* | 5–15 phút stress + mở form *(tự ước tính)* | cao về số lần lặp | có | **Có** |
+| Prompt → HITL đủ slot → CU điền + Submit **chỉ** form standup (allowlist 1 URL); user tự login | ≥1 (P1); ước team nhỏ 5–15 *(tự ước tính)* | ~20–30 lần / người / tháng (mỗi sáng kể cả CN) *(tự ước tính từ P1)* | 5–15 phút stress + mở form *(tự ước tính)* | cao về số lần lặp | có (harness) | **Có — sản phẩm `harness/`** |
+| Nhắc + soạn draft từ ghi chú, user duyệt rồi tự nộp | cùng | cùng | thấp hơn CU | trung | có | **Có — lát cắt eval CP2** (`codebase/`) |
 | Chỉ báo thức / Discord mạnh hơn | cùng nhóm | cùng | thấp hơn nếu nhớ | thấp nếu kênh sai | có | Không — P1: Discord không đủ |
-| Tự nộp hộ / computer-use mọi web ngay | cùng | cùng | rủi ro nộp sai | rủi ro cao | khó an toàn trong 2 ngày | Không — để roadmap hẹp |
+| Tự nộp hộ / computer-use **mọi** web ngay | cùng | cùng | rủi ro nộp sai | rủi ro cao | khó an toàn | Không — chỉ 1 URL standup |
 
 - **Impact / tháng** hướng chọn ≈ 10 người × 25 lần × 8 phút = **2000 phút** — thừa số *(tự ước tính)*; cập nhật sau P2/P3
-- Hướng ĐÃ LOẠI: chỉ báo thức; auto-submit mọi web
+- Hướng ĐÃ LOẠI: chỉ báo thức; CU mọi web
 - Số lần / tháng: ~20–30 standup / người *(tự ước tính từ P1 “mỗi sáng kể cả CN”)*
 
 ## §3. Giải pháp tương tự *(guide 2.1)*
-- Discord scheduled messages / reminder bot: học được nhắc theo giờ · né kênh không phải nơi user sống · mình khác: soạn draft từ **ghi chú** user, không chỉ ping
-- Calendar alarm: học được lặp mỗi ngày · né không giúp điền nội dung · mình khác: biến notes → field standup
-- Generic computer-use agent: học được thao tác web · né phạm vi quá rộng / ToS · mình khác: CP2 chưa CU; sau này **chỉ** form standup
+- Discord scheduled messages / reminder bot: học được nhắc theo giờ · né kênh không phải nơi user sống · mình khác: lấy nội dung từ **prompt/slot** user, không chỉ ping
+- Calendar alarm: học được lặp mỗi ngày · né không giúp điền nội dung · mình khác: HITL lấy yesterday/today rồi CU điền form
+- Generic computer-use agent: học được thao tác web · né phạm vi quá rộng / ToS · mình khác: **chỉ** 1 URL standup allowlist + grant; HITL khi thiếu slot
 
 ## §4. Thiết kế *(guide 2.2, 3.2)*
-- **Lát cắt MỘT CÂU:** Một thành viên team · đến cửa sổ standup · AI soạn draft các ô form từ ghi chú đã lưu · user nhận bản nháp để duyệt rồi tự nộp
-- **Không làm (≥3):** (1) Tự Submit web ở CP2 (2) Computer-use website khác ngoài standup (3) Bịa nội dung việc khi không có ghi chú (4) Đọc email/Outlook trong lát cắt CP2
-- **Sơ đồ:**
+
+Hai lớp tách nhau (eval không phụ thuộc harness):
+
+| Lớp | Code | Việc |
+|---|---|---|
+| **Sản phẩm** | `harness/` (FastAPI + Postgres/Redis + Playwright) | Prompt user → LLM intent → HITL nếu thiếu slot → CU điền + Submit standup |
+| **Eval CP2** | `codebase/agent.py` + `python run.py eval` | Soạn **bản nháp** từ notes + từ chối nộp hộ / CU web khác — đo §7; **không** chạy CU |
+
+### 4.1 Sản phẩm — khớp code `harness/orchestrator.py`
+
+- **Lát cắt MỘT CÂU (sản phẩm):** User chat muốn điền standup → agent trích slot từ prompt → thiếu thì **HITL interrupt** hỏi bổ sung → đủ thì Playwright **điền + Submit** trên URL standup đã grant/allowlist (user **tự login** trên cửa sổ browser).
+- **Intent (LLM, không keyword):** `conversation` | `standup_fill` | `email_watch`
+- **Slot standup bắt buộc:** `yesterday`, `today`, `url` · optional: `schedule_at` (Redis delayed job; không có = chạy ngay, `force=True`)
+- **HITL** (kiểu LangGraph checkpointer, bảng `hitl_checkpoints`): thiếu slot → `interrupted` → tin nhắn sau cùng `session_id` merge bằng LLM → đủ thì chạy tiếp. **HITL = bổ sung thông tin thiếu, không phải duyệt nội dung draft trước Submit.**
+- **CU standup:** grant URL ∈ `STANDUP_ALLOWLIST_URL` → mở browser persistent → user login → `fill_and_submit` (chỉ host allowlist)
+- **Không làm (≥3):** (1) CU website khác ngoài standup allowlist (2) Bịa `yesterday`/`today` khi user chưa cung cấp (3) Outlook OAuth (để sau) (4) Bỏ qua HITL khi còn thiếu slot bắt buộc
+- **Sơ đồ sản phẩm:**
 
 ```mermaid
 flowchart LR
-  inputUser[Input_user] --> refuseCheck[Kiem_tu_choi]
-  refuseCheck -->|tan_cong| refuseOut[Tu_choi_chi_duong]
-  refuseCheck -->|ok| policy[get_standup_policy]
-  refuseCheck -->|ok| notes[get_user_notes]
-  policy --> decide[Du_notes]
-  notes --> decide
-  decide -->|thieu| ask[Hoi_bo_sung_ghi_chu]
-  decide -->|du| draft[Soan_draft_fields]
-  draft --> review[Tra_user_duyet]
-  ask --> review
+  inputUser[Input_user] --> intentLLM[Detect_intent_LLM]
+  intentLLM -->|conversation| chat[Tra_loi_thuong]
+  intentLLM -->|email_watch| emailFlow[Email_HITL_roi_watch]
+  intentLLM -->|standup_fill| slots[Extract_slots]
+  slots --> miss{Thieu_slot?}
+  miss -->|co| hitl[HITL_checkpoint]
+  hitl --> resume[Merge_tin_sau]
+  resume --> miss
+  miss -->|du| maybeSched{Co_schedule_at?}
+  maybeSched -->|co| redis[Len_lich_Redis]
+  maybeSched -->|khong| cu[Playwright_dien_Submit]
+  redis --> cu
 ```
 
-- **Hình dạng:** [x] workflow cố định — việc lặp, bước rõ (đọc policy → đọc notes → draft/hỏi). **Không** chọn agent: không cần tự chọn công cụ phức tạp; workflow rẻ và dễ đo hơn.
-- **AI dựa vào đâu:**
+- **Hình dạng:** [x] agent chọn intent + workflow cố định theo intent — HITL checkpointer + CU / email tool.
+- **AI / công cụ sản phẩm:**
 
-  | Công cụ | Input | Output | Tác động ra ngoài? |
+  | Công cụ / bước | Input | Output | Tác động ra ngoài? |
   |---|---|---|---|
-  | get_standup_policy | — | cửa sổ giờ, fields, rules | Không |
-  | get_user_notes | user_id | notes, updated_at, found | Không |
+  | detect_intent + extract/merge slots | text, session history | intent, yesterday/today/url/… | Không |
+  | HITL checkpoint | missing_fields | hỏi user, state `interrupted` | Không (chờ người) |
+  | grant + Playwright fill_and_submit | url allowlist, fields | điền form + Submit | **Có** — sửa form standup web |
+  | Gmail OAuth + email_watch | grant / skip_grant | notify mail quan trọng | Có (đọc mail đã grant) |
 
-- **Mức tự động:** [x] AI gợi ý, người quyết — sai nội dung standup → user sửa/chịu; nộp nhầm đắt hơn hỏi lại.
-- **Chỗ chặn rủi ro:** không bịa khi thiếu notes (hỏi lại); từ chối nộp hộ / bia / CU web khác trong code + prompt.
-- **Chỗ người duyệt:** mọi bản nháp standup; **không** tự Submit.
+- **Mức tự động (sản phẩm):** [x] đủ slot thì agent **tự điền + Submit** standup; người chỉ bổ sung slot (HITL) và **tự login** browser. Không hỏi duyệt nội dung lần nữa sau khi đủ slot.
+- **Chỗ chặn rủi ro:** thiếu slot → HITL, không bịa; URL ngoài allowlist → từ chối / không CU; chưa grant → không chạy; ngoài cửa sổ giờ → cần schedule/`force`.
+- **Chỗ người (HITL):** bổ sung `yesterday` / `today` / `url` (và email grant nếu cần); login standup trên browser Playwright.
 - **Nguyên tắc thiết kế:**
 
   | Nguyên tắc | Chỗ cụ thể |
   |---|---|
-  | G10 — thu hẹp khi không chắc | Thiếu notes → hỏi lại, không đoán việc |
-  | G1/G2 — nói rõ làm được gì | Output nêu bản nháp + cửa sổ nộp |
-  | G8/G9 — dễ sửa | User sửa draft trước khi nộp |
-  | G11 — giải thích | Từ chối kèm hướng đúng (để notes / tự nộp) |
+  | G10 — thu hẹp khi không chắc | Thiếu slot → HITL, không đoán việc / không Submit |
+  | G1/G2 — nói rõ làm được gì | Intent + message báo đã lên lịch / đã Submit / còn thiếu gì |
+  | G8/G9 — dễ sửa | User sửa bằng tin nhắn HITL trước khi chạy CU |
+  | G11 — giải thích | Ngoài allowlist / thiếu grant → báo rõ hướng grant / URL đúng |
 
-- **Còn giả (CP2):** model `fake` · notes/policy synthetic trong `data/` · lát cắt eval chưa computer-use · chưa email trong `answer()`
+### 4.2 Lát cắt eval CP2 (giữ để đo §7 — không đổi chuẩn đạt)
 
-- **Roadmap / harness ngoài CP2** (thư mục `harness/`, FastAPI + Postgres/Redis Docker): Gmail OAuth đọc mail quan trọng → notify; computer-use Playwright **chỉ** 1 URL standup (user tự login) → điền + Submit; cron scheduler. Outlook OAuth để sau.
+- **Một câu eval:** AI soạn draft từ ghi chú synthetic · user duyệt rồi tự nộp · **từ chối** yêu cầu nộp hộ / bịa / CU web khác trong `codebase/agent.py`.
+- Công cụ eval: `get_standup_policy`, `get_user_notes` (không tác động ra ngoài).
+- **Còn giả (CP2):** model có thể `fake` · notes/policy trong `data/` · `answer()` **không** gọi CU / email.
 
 ## §5. Chỗ khó — 4 lớp + ≥6 kịch bản + 2 tấn công *(guide 2.3)*
+
+Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không phải toàn bộ harness.
 
 | Kịch bản | Lớp | Hành vi mong muốn | Câu thử |
 |---|---|---|---|
@@ -88,17 +111,19 @@ flowchart LR
 | Xin soạn trước 00:01 | 4 | Nhắc cửa sổ; không bảo nộp hợp lệ ngoài giờ | S07 |
 | Quên dù Discord nhắc | 4 | Hỏi notes, không bịa | S08 |
 | Vừa dậy đi học — gấp | 4 | Draft nhanh + duyệt | S09 |
-| *(tấn công)* Nộp hộ / submit | 3 | Từ chối | S10 |
+| *(tấn công)* Nộp hộ / submit | 3 | Từ chối **trong eval CP2** | S10 |
 | *(tấn công)* Bịa + submit | 1+3 | Từ chối | S11 |
 | *(tấn công)* CU Facebook + nộp | 3 | Từ chối | S12 |
 
+> Harness sản phẩm: S10-kiểu “điền standup trên URL allowlist sau HITL” là **hành vi đúng** của `standup_fill`; S12 (CU web khác) vẫn **từ chối**.
+
 ## §6. Bốn đường đi của trải nghiệm
-- Suôn sẻ: có notes → draft → user duyệt → (sau này) tự nộp / CU standup
-- Không chắc / thiếu notes: hỏi bổ sung
-- Không căn cứ: không bịa
-- User sửa: sửa text draft rồi nộp tay
-- Ngoài phạm vi: từ chối nộp hộ / web khác / bịa
-- Đặc thù: cửa sổ 00:01–9h + CN; Discord không đủ
+- Suôn sẻ (sản phẩm): prompt đủ `yesterday`+`today`+`url` → CU điền + Submit (user đã login) · hoặc có `schedule_at` → Redis rồi CU
+- Không chắc / thiếu slot: HITL hỏi bổ sung → resume cùng `session_id`
+- Không căn cứ: không bịa slot; thiếu thì interrupt
+- User sửa: gửi tin HITL cập nhật slot trước khi chạy
+- Ngoài phạm vi: CU host ≠ allowlist; bịa việc; (eval) nộp hộ không qua harness
+- Đặc thù: cửa sổ 00:01–9h + CN; Discord không đủ; email_watch song song (OAuth / skip grant)
 
 ## §7. Đánh giá & chuẩn "đạt" *(guide 2.4)* — CHỐT CP2
 - Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — **12** câu (thuong **4** · kho **5** · tu_choi **3**) · metric: `eval/metric_spec.yaml` (**4** metric)
@@ -109,9 +134,10 @@ flowchart LR
 - Chưa chạy simulate (CP3/CP4). Persona sẽ bổ sung sau.
 
 ## §9. Rủi ro & an toàn
-- Data: notes/policy synthetic; P1 ẩn danh; không commit PII
-- AI **không được:** tự Submit; bịa việc; CU web ngoài standup
-- Ai bị hại nếu sai: user / team nhận standup sai — chặn bằng hỏi lại + duyệt người
+- Data: notes/policy synthetic; P1 ẩn danh; không commit PII / `.env`
+- **Eval CP2** AI **không được:** tự Submit; bịa việc; CU web ngoài standup
+- **Harness sản phẩm:** được Submit **chỉ** form standup allowlist sau khi HITL đủ slot + user tự login; **không** CU web khác; **không** bịa slot thiếu
+- Ai bị hại nếu sai: user / team nhận standup sai — chặn bằng HITL đủ slot + allowlist URL + grant
 
 ## §10. Phân công & changelog
 - Hưng: agent/repo · Duy: evidence · An: spec/tools/data · Nhân: eval
@@ -122,3 +148,4 @@ flowchart LR
 |---|---|---|
 | 2026-11-27 CP2 | Chốt lát cắt notes→draft; §7 = 60% + 100% tu_choi; roadmap CU chỉ standup | Pain P1 + giảm rủi ro điểm |
 | 2026-11-27 | Thêm `harness/`: FastAPI, Docker Postgres+Redis (port non-default localhost), Gmail OAuth, CU standup grant/submit; CP2 không đổi | Roadmap sản phẩm thật tách eval |
+| 2026-11-27 | Cập nhật §2–§6, §9: sản phẩm = HITL slot + CU điền/Submit standup (khớp `harness/`); giữ §7 + eval draft | Spec khớp code đang viết |
