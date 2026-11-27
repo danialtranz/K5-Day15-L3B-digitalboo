@@ -3,14 +3,20 @@ from __future__ import annotations
 
 import time
 from contextlib import contextmanager
-from typing import Iterator, Optional
 from urllib.parse import urlparse
 
-from harness.channels import notify as notify_mod  # noqa: F401 — submodule
-from harness.config import ensure_dirs, load_yaml, settings
+from harness.channels import notify as notify_mod
+from harness.computer_use.playbook import (
+    is_safe_https_url,
+    looks_like_login,
+    match_playbook,
+    resolve_strategy,
+)
+from harness.config import ensure_dirs, settings
 
 
 def host_allowed(url: str, allowlist_url: str) -> bool:
+    """Tương thích cũ: cùng host (+ path) với STANDUP_ALLOWLIST_URL, hoặc login cùng host."""
     if not allowlist_url:
         return False
     a = urlparse(allowlist_url)
@@ -19,19 +25,42 @@ def host_allowed(url: str, allowlist_url: str) -> bool:
         return False
     if a.netloc.lower() != u.netloc.lower():
         return False
-    # path allowlist: URL hiện tại phải cùng prefix path (nếu allowlist có path)
     ap = (a.path or "/").rstrip("/") or "/"
     up = u.path or "/"
     if ap != "/" and not (up == ap or up.startswith(ap + "/")):
-        # vẫn cho phép trang login trên cùng host
-        return _looks_like_login(url)
+        return looks_like_login(url)
     return True
 
 
-def _looks_like_login(url: str) -> bool:
-    low = url.lower()
-    patterns = (load_yaml("sites.yaml").get("standup") or {}).get("login_url_patterns") or []
-    return any(p.lower() in low for p in patterns)
+def url_permitted(url: str) -> bool:
+    """
+    Cho phép mở browser khi:
+    - khớp playbook (Edufun), hoặc
+    - HTTPS an toàn (vision CU cho URL user cung cấp), hoặc
+    - cùng host với STANDUP_ALLOWLIST_URL (legacy).
+    """
+    if not url or not is_safe_https_url(url):
+        return False
+    if match_playbook(url):
+        return True
+    if resolve_strategy(url) == "vision":
+        return True
+    allow = settings().get("standup_allowlist_url") or ""
+    return bool(allow) and host_allowed(url, allow)
+
+
+def same_host(url: str, ref_url: str) -> bool:
+    if not ref_url or not url:
+        return False
+    return urlparse(url).netloc.lower() == urlparse(ref_url).netloc.lower()
+
+
+def _on_target_path(url: str, target_url: str) -> bool:
+    ap = (urlparse(target_url).path or "/").rstrip("/") or "/"
+    up = urlparse(url).path or "/"
+    if ap == "/":
+        return True
+    return up == ap or up.startswith(ap + "/")
 
 
 @contextmanager
@@ -44,9 +73,19 @@ def open_browser(start_url: str, user_id: str = "u1"):
 
     ensure_dirs()
     s = settings()
-    allow = s["standup_allowlist_url"]
-    if not host_allowed(start_url, allow):
-        raise PermissionError(f"URL không nằm allowlist: {start_url} (allow={allow})")
+    if not url_permitted(start_url):
+        raise PermissionError(
+            f"URL không được phép (cần https + playbook hoặc vision an toàn): {start_url}"
+        )
+
+    strategy = resolve_strategy(start_url)
+    notify_mod.push(
+        user_id,
+        "standup_browser",
+        "Đang mở trình duyệt standup",
+        f"Agent mở ({strategy}): {start_url}\nNếu cần đăng nhập, hãy đăng nhập trên cửa sổ vừa mở.",
+        {"url": start_url, "strategy": strategy},
+    )
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
@@ -56,20 +95,38 @@ def open_browser(start_url: str, user_id: str = "u1"):
         )
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(start_url, wait_until="domcontentloaded")
-        wait_until_logged_in(page, allow, user_id=user_id, timeout_sec=s["login_wait_timeout_sec"])
+        wait_until_logged_in(
+            page,
+            start_url,
+            user_id=user_id,
+            timeout_sec=s["login_wait_timeout_sec"],
+            target_url=start_url,
+            vision_mode=(strategy == "vision"),
+        )
         try:
             yield page
         finally:
             context.close()
 
 
-def wait_until_logged_in(page, allowlist_url: str, user_id: str, timeout_sec: int = 300) -> None:
-    """Nếu đang ở trang login → notify user và poll đến khi thoát login / vào allowlist path."""
+def wait_until_logged_in(
+    page,
+    allowlist_url: str,
+    user_id: str,
+    timeout_sec: int = 300,
+    target_url: str | None = None,
+    vision_mode: bool = False,
+) -> None:
+    """Nếu đang ở trang login → notify user và poll đến khi thoát login / vào target."""
     deadline = time.time() + timeout_sec
     notified = False
+    navigated_back = False
+    target = target_url or allowlist_url
+    ref_host = target or allowlist_url
+
     while time.time() < deadline:
         url = page.url
-        if _looks_like_login(url):
+        if looks_like_login(url):
             if not notified:
                 notify_mod.push(
                     user_id,
@@ -79,12 +136,42 @@ def wait_until_logged_in(page, allowlist_url: str, user_id: str, timeout_sec: in
                     {"url": url},
                 )
                 notified = True
+            navigated_back = False
             page.wait_for_timeout(2000)
             continue
-        if host_allowed(url, allowlist_url):
-            return
-        # host lạ → abort
-        if allowlist_url and urlparse(url).netloc.lower() != urlparse(allowlist_url).netloc.lower():
-            raise PermissionError(f"Rời allowlist host: {url}")
-        page.wait_for_timeout(1000)
+
+        # OAuth (GitHub/Google/…) nhảy host — luôn chờ, không abort sớm
+        if not same_host(url, ref_host):
+            # Sau OAuth thường về host gốc; nếu đã thoát login thì thử quay target
+            if not navigated_back and target:
+                try:
+                    page.goto(target, wait_until="domcontentloaded")
+                    navigated_back = True
+                except Exception:
+                    page.wait_for_timeout(1000)
+            else:
+                page.wait_for_timeout(1000)
+            continue
+
+        if target and not _on_target_path(url, target):
+            if not navigated_back:
+                try:
+                    page.goto(target, wait_until="domcontentloaded")
+                    navigated_back = True
+                except Exception:
+                    page.wait_for_timeout(1000)
+            else:
+                page.wait_for_timeout(1000)
+            continue
+
+        if notified:
+            notify_mod.push(
+                user_id,
+                "standup_login_ok",
+                "Đã đăng nhập standup",
+                "Agent tiếp tục điền form standup.",
+                {"url": url},
+            )
+        return
+
     raise TimeoutError("Hết thời gian chờ user đăng nhập standup")

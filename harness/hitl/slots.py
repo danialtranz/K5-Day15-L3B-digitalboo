@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 STANDUP_REQUIRED = ("yesterday", "today", "url")
-STANDUP_OPTIONAL = ("schedule_at",)
+STANDUP_OPTIONAL = ("schedule_at", "schedule_enabled", "schedule_time", "schedule_repeat")
 
 EXTRACT_SYSTEM = """Bạn trích thông tin từ tin nhắn user cho agent.
 Chỉ trả về ĐÚNG một JSON object, không markdown.
@@ -15,8 +15,24 @@ Với intent standup_fill, schema:
   "yesterday": string|null,
   "today": string|null,
   "url": string|null,
-  "schedule_at": string|null
+  "schedule_at": string|null,
+  "run_now": boolean|null,
+  "schedule_enabled": boolean|null,
+  "schedule_time": string|null,
+  "schedule_weekday": number|null,
+  "schedule_date": string|null,
+  "schedule_repeat": "once"|"daily"|"weekly"|null
 }
+Giải thích standup:
+- url: link trang nộp standup (https…).
+- yesterday / today: nội dung điền form; null nếu user chỉ hẹn lịch chưa đưa nội dung.
+- schedule_enabled: true nếu user muốn hẹn giờ / định kỳ điền standup (vd «mỗi 8h tối», «từ giờ cứ…»).
+- schedule_time: "HH:MM" 24h — «8h tối» → "20:00", «8 giờ sáng» → "08:00".
+- schedule_repeat: "daily" nếu mỗi ngày / hàng ngày / cứ mỗi … tối; "weekly" nếu mỗi tuần + thứ; "once" nếu chỉ một lần.
+- schedule_weekday: 0=Thứ Hai … 6=Chủ Nhật khi weekly.
+- schedule_date: "YYYY-MM-DD" khi one-shot có ngày.
+- schedule_at: legacy "HH:MM" one-shot (ưu tiên dùng schedule_* ở trên).
+- run_now: true chỉ khi user muốn điền ngay bây giờ; nếu chỉ hẹn lịch thì false hoặc null.
 Với intent email_watch, schema:
 {
   "notify_interval_sec": number|null,
@@ -24,6 +40,8 @@ Với intent email_watch, schema:
   "after_date": string|null,
   "before_date": string|null,
   "include_read": boolean|null,
+  "search_query": string|null,
+  "topic": string|null,
   "run_now": boolean|null,
   "schedule_enabled": boolean|null,
   "schedule_time": string|null,
@@ -33,6 +51,9 @@ Với intent email_watch, schema:
 }
 Giải thích email:
 - newer_than_days / after_date / before_date / include_read: khung quét mail (null newer_than → hệ thống mặc định 7 ngày).
+- search_query: chuỗi tìm Gmail khi user hỏi chủ đề cụ thể (vd «đăng ký nhập học», «hóa đơn»). Viết keyword/OR tiếng Việt+Anh, không bọc ngoặc thừa; null nếu chỉ «đọc mail quan trọng / kiểm tra hộp thư».
+- topic: mô tả ngắn chủ đề user hỏi (tiếng Việt), null nếu quét chung.
+- include_read: true nếu user hỏi về một chủ đề cụ thể (có thể đã đọc); false/null nếu chỉ quét unread.
 - run_now: true nếu user muốn kiểm tra email ngay trong lượt này.
 - schedule_enabled: true nếu user muốn hẹn giờ đọc email / nhắc sau này.
 - schedule_time: "HH:MM" (24h), vd "07:00".
@@ -46,20 +67,36 @@ State hiện tại (JSON) và missing_fields được cung cấp.
 Hãy gộp tin nhắn mới vào state, trả về ĐÚNG một JSON object cùng schema state (standup hoặc email).
 Field cũ giữ nguyên nếu tin nhắn mới không cập nhật. Không bịa.
 Không cho phép bỏ qua kết nối email — không tạo field skip_grant.
-Với lịch email: điền schedule_time / schedule_weekday / schedule_date / schedule_repeat khi user cung cấp."""
+Với lịch (email/standup): điền schedule_time / schedule_weekday / schedule_date / schedule_repeat khi user cung cấp.
+«8h tối» → schedule_time "20:00"; «mỗi ngày» → schedule_repeat "daily"."""
 
 HITL_MESSAGE_SYSTEM = """Bạn là trợ lý digitalboo, nói chuyện tự nhiên với người dùng bằng tiếng Việt.
 Nhiệm vụ: viết ĐÚNG một tin nhắn ngắn (1–3 câu) giải thích cần gì tiếp theo, thân thiện, rõ ràng.
+Được dùng Markdown nhẹ (in đậm, list) khi giúp đọc rõ hơn — không bọc cả tin trong code fence.
 TUYỆT ĐỐI KHÔNG dùng jargon kỹ thuật: không nói HITL, checkpoint, missing_fields, grant, OAuth, API, actions, Redis, cron.
 Nếu thiếu kết nối Gmail: mời người dùng bấm nút kết nối Gmail trên giao diện (nút sẽ hiện sẵn) — KHÔNG nói có thể bỏ qua.
-Nếu thiếu lịch (giờ / thứ trong tuần / ngày): hỏi tự nhiên phần còn thiếu để hẹn đọc email.
+Nếu thiếu lịch (giờ / thứ trong tuần / ngày): hỏi tự nhiên phần còn thiếu để hẹn giờ.
 Nếu thiếu thông tin standup (hôm qua / hôm nay / URL): hỏi tự nhiên những phần còn thiếu.
+Nếu still_needed có browser_login: bảo người dùng đăng nhập trên cửa sổ trình duyệt vừa mở (GitHub/Google/portal), xong thì nhắn lại (vd «đã đăng nhập») để mình tiếp tục điền form. Không yêu cầu gửi mật khẩu trong chat.
+Nhắc nhẹ mỗi ô hôm qua/hôm nay nên ≥40 ký tự (theo form portal) khi sắp điền ngay.
 Không liệt kê bullet máy móc trừ khi thật cần. Không thêm lời dẫn kiểu "Thiếu thông tin — …".
 Chỉ trả về nội dung tin nhắn, không JSON, không markdown fence."""
 
-SCHEDULE_CONFIRM_SYSTEM = """Bạn là trợ lý digitalboo. Viết ĐÚNG một tin nhắn ngắn tiếng Việt xác nhận đã hẹn lịch đọc email quan trọng.
-Không jargon (không nói Redis, cron, job_id, unix). Nêu rõ thời điểm và có lặp hàng tuần hay chỉ một lần.
-Nếu đồng thời đã quét ngay, nhắc ngắn kết quả quét. Chỉ trả về nội dung tin nhắn."""
+SCHEDULE_CONFIRM_SYSTEM = """Bạn là trợ lý digitalboo. Viết ĐÚNG một tin nhắn ngắn tiếng Việt xác nhận đã hẹn lịch.
+Không jargon (không nói Redis, cron, job_id, unix). Nêu rõ việc gì (đọc email / điền standup), URL nếu có, thời điểm, và lặp daily/weekly hay chỉ một lần.
+Nhắc nhẹ: đến giờ hệ thống mới chạy; kết quả (thành công/thất bại) sẽ báo qua thông báo desktop.
+Nếu đồng thời đã chạy ngay, nhắc ngắn kết quả. Chỉ trả về nội dung tin nhắn."""
+
+EMAIL_WATCH_REPLY_SYSTEM = """Bạn là trợ lý digitalboo. Nhiệm vụ: viết tin nhắn trả lời user SAU KHI đã chạy tool đọc Gmail.
+Chỉ dựa trên tool_result (digest mail thật). Không bịa mail, người gửi, hay nội dung không có trong dữ liệu.
+Trả lời đúng câu hỏi user:
+- Nếu hỏi về chủ đề cụ thể (topic/search): nói rõ CÓ / KHÔNG thấy mail khớp; nếu có thì nêu 1–3 thư liên quan (người gửi + tiêu đề + ý ngắn).
+- Nếu quét chung / mail quan trọng: tóm tắt những thư quan trọng hoặc đáng chú ý; bỏ qua spam/promo ồn ào trừ khi user hỏi sale.
+- Nếu hộp thư toàn promo và không khớp chủ đề: nói thẳng không thấy tin liên quan, có thể nhắc ngắn đang thấy chủ yếu quảng cáo.
+Giọng tiếng Việt tự nhiên, 2–8 câu hoặc list ngắn. Markdown nhẹ (in đậm, list) OK.
+Không jargon (không nói heuristic, keyword rule, query Gmail, already_seen, digest).
+Không dump nguyên danh sách 20 mail promo. Không mở đầu kiểu "Đã quét N mail (query: …)".
+Chỉ trả về nội dung tin nhắn, không JSON, không markdown fence."""
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -111,11 +148,50 @@ def extract_standup_slots(text: str, history_text: str = "") -> dict[str, Any]:
         EXTRACT_SYSTEM,
         with_history(history_text, text, extra="intent=standup_fill — trích slot từ lịch sử + tin hiện tại."),
     )
+    schedule_time = _normalize_time(_str_or_none(data.get("schedule_time")))
+    # Legacy schedule_at "HH:MM" → schedule_time
+    legacy_at = _str_or_none(data.get("schedule_at"))
+    if not schedule_time and legacy_at:
+        schedule_time = _normalize_time(legacy_at) or schedule_time
+
+    schedule_enabled = data.get("schedule_enabled")
+    if schedule_enabled is not None:
+        schedule_enabled = bool(schedule_enabled)
+    repeat = _str_or_none(data.get("schedule_repeat"))
+    if repeat and repeat not in ("once", "daily", "weekly"):
+        repeat = None
+    weekday = _parse_int(data.get("schedule_weekday"), min_v=0, max_v=6)
+    schedule_date = _str_or_none(data.get("schedule_date"))
+    run_now = data.get("run_now")
+    if run_now is not None:
+        run_now = bool(run_now)
+
+    # Suy luận: có giờ/lặp → bật lịch
+    if schedule_enabled is None and (schedule_time or weekday is not None or schedule_date or repeat or legacy_at):
+        schedule_enabled = True
+    if schedule_enabled and repeat is None:
+        # «mỗi ngày / từ giờ cứ …» → daily; có weekday → weekly; còn lại once
+        if weekday is not None and not schedule_date:
+            repeat = "weekly"
+        elif schedule_date:
+            repeat = "once"
+        elif schedule_time or legacy_at:
+            repeat = "daily"
+    # Chỉ hẹn lịch → mặc định không chạy ngay
+    if schedule_enabled and run_now is None:
+        run_now = False
+
     return {
         "yesterday": _str_or_none(data.get("yesterday")),
         "today": _str_or_none(data.get("today")),
         "url": _str_or_none(data.get("url")),
-        "schedule_at": _str_or_none(data.get("schedule_at")),
+        "schedule_at": legacy_at,
+        "run_now": run_now,
+        "schedule_enabled": schedule_enabled,
+        "schedule_time": schedule_time,
+        "schedule_weekday": weekday,
+        "schedule_date": schedule_date,
+        "schedule_repeat": repeat,
         "_model": data.get("_model"),
         "_tokens_in": data.get("_tokens_in"),
         "_tokens_out": data.get("_tokens_out"),
@@ -149,6 +225,12 @@ def extract_email_slots(text: str, history_text: str = "") -> dict[str, Any]:
     include_read = data.get("include_read")
     if include_read is not None:
         include_read = bool(include_read)
+    search_query = _str_or_none(data.get("search_query"))
+    topic = _str_or_none(data.get("topic"))
+    # Hỏi chủ đề cụ thể → mặc định quét cả mail đã đọc
+    if search_query or topic:
+        if include_read is None:
+            include_read = True
     run_now = data.get("run_now")
     if run_now is not None:
         run_now = bool(run_now)
@@ -176,6 +258,8 @@ def extract_email_slots(text: str, history_text: str = "") -> dict[str, Any]:
         "after_date": _str_or_none(data.get("after_date")),
         "before_date": _str_or_none(data.get("before_date")),
         "include_read": include_read,
+        "search_query": search_query,
+        "topic": topic,
         "run_now": run_now,
         "schedule_enabled": schedule_enabled,
         "schedule_time": schedule_time,
@@ -211,6 +295,11 @@ def build_gmail_query(state: dict[str, Any] | None = None) -> str:
         if days < 1:
             days = 1
         parts.append(f"newer_than:{days}d")
+
+    search = _str_or_none(state.get("search_query"))
+    if search:
+        # Bỏ operator nguy hiểm; giữ OR/dấu ngoặc đơn giản cho Gmail q
+        parts.append(f"({search})")
 
     return " ".join(parts)
 
@@ -250,19 +339,67 @@ def merge_slots(
         merged["schedule_weekday"] = _parse_int(merged.get("schedule_weekday"), min_v=0, max_v=6)
     if "schedule_repeat" in merged:
         r = _str_or_none(merged.get("schedule_repeat"))
-        merged["schedule_repeat"] = r if r in ("once", "weekly") else merged.get("schedule_repeat")
+        allowed = ("once", "daily", "weekly") if intent == "standup_fill" else ("once", "weekly")
+        merged["schedule_repeat"] = r if r in allowed else merged.get("schedule_repeat")
+    if "schedule_enabled" in merged and merged.get("schedule_enabled") is not None:
+        merged["schedule_enabled"] = bool(merged.get("schedule_enabled"))
+    if "run_now" in merged and merged.get("run_now") is not None:
+        merged["run_now"] = bool(merged.get("run_now"))
     merged["_model"] = data.get("_model")
     merged["_tokens_in"] = data.get("_tokens_in")
     merged["_tokens_out"] = data.get("_tokens_out")
     return merged
 
 
-def standup_missing(state: dict[str, Any]) -> list[str]:
-    missing = []
-    for key in STANDUP_REQUIRED:
-        val = state.get(key)
-        if not val or not str(val).strip():
-            missing.append(key)
+def standup_schedule_missing(state: dict[str, Any]) -> list[str]:
+    """Thiếu slot lịch khi user muốn hẹn giờ điền standup."""
+    if not state.get("schedule_enabled"):
+        return []
+    missing: list[str] = []
+    if not _normalize_time(_str_or_none(state.get("schedule_time"))):
+        # fallback legacy
+        if not _normalize_time(_str_or_none(state.get("schedule_at"))):
+            missing.append("schedule_time")
+    repeat = _str_or_none(state.get("schedule_repeat")) or "daily"
+    if repeat == "weekly":
+        if _parse_int(state.get("schedule_weekday"), min_v=0, max_v=6) is None:
+            missing.append("schedule_weekday")
+    elif repeat == "once":
+        if not _str_or_none(state.get("schedule_date")):
+            if _parse_int(state.get("schedule_weekday"), min_v=0, max_v=6) is None:
+                # once + chỉ có giờ vẫn OK (next_run_unix xử lý ngày mai)
+                pass
+    return missing
+
+
+def standup_missing(state: dict[str, Any], *, min_chars: int | None = None) -> list[str]:
+    missing: list[str] = []
+    schedule_only = bool(state.get("schedule_enabled")) and not bool(state.get("run_now"))
+
+    if schedule_only:
+        # Chỉ hẹn lịch: cần URL + giờ lịch; nội dung điền lấy notes lúc chạy
+        if not (state.get("url") or "").strip():
+            missing.append("url")
+        missing.extend(standup_schedule_missing(state))
+    else:
+        for key in STANDUP_REQUIRED:
+            val = state.get(key)
+            if not val or not str(val).strip():
+                missing.append(key)
+        # Portal scripted yêu cầu độ dài tối thiểu khi chạy ngay
+        if min_chars and min_chars > 0:
+            for key in ("yesterday", "today"):
+                if key in missing:
+                    continue
+                val = (state.get(key) or "").strip()
+                if val and len(val) < min_chars:
+                    missing.append(key)
+        missing.extend(standup_schedule_missing(state))
+
+    # Cờ chờ user đăng nhập trên browser (giữ qua HITL)
+    if state.get("_need_browser_login") or state.get("browser_login_pending"):
+        if "browser_login" not in missing:
+            missing.append("browser_login")
     return missing
 
 
@@ -349,12 +486,79 @@ def compose_hitl_message(
     reply = llm_text(HITL_MESSAGE_SYSTEM, json.dumps(payload, ensure_ascii=False))
     text = reply.get("text") or ""
     if not text:
-        if "email_grant" in missing:
+        if "browser_login" in missing:
+            text = (
+                "Cửa sổ trình duyệt đang mở trang đăng nhập. "
+                "Bạn đăng nhập giúp mình trên cửa sổ đó, xong nhắn «đã đăng nhập» để mình điền standup tiếp nhé."
+            )
+        elif "email_grant" in missing:
             text = "Để mình đọc hộp thư giúp bạn, hãy kết nối Gmail bằng nút trên màn hình nhé."
         elif any(x.startswith("schedule_") for x in missing):
             text = "Bạn cho mình biết rõ giờ (và thứ/ngày) muốn mình kiểm tra email giúp bạn nhé."
+        elif "yesterday" in missing or "today" in missing:
+            text = (
+                "Đến giờ standup — bạn gửi giúp mình nội dung "
+                "«hôm qua đã làm gì» và «hôm nay sẽ làm gì» nhé."
+            )
         else:
             text = "Mình cần thêm một vài thông tin trước khi làm tiếp — bạn bổ sung giúp mình nhé."
+    return reply
+
+
+def compose_email_watch_reply(
+    *,
+    tool_result: dict[str, Any],
+    user_text: str = "",
+    history_text: str = "",
+    topic: str | None = None,
+) -> dict[str, Any]:
+    """LLM tổng hợp câu trả lời từ kết quả tool Gmail — không template cứng."""
+    digest = tool_result.get("digest") or []
+    slim = [
+        {
+            "from": r.get("from"),
+            "subject": r.get("subject"),
+            "snippet": r.get("snippet"),
+            "date": r.get("date"),
+            "important": bool(r.get("important")),
+            "reason": r.get("reason"),
+        }
+        for r in digest[:25]
+        if isinstance(r, dict)
+    ]
+    payload = {
+        "user_message": user_text,
+        "chat_history": history_text,
+        "topic": topic or tool_result.get("topic"),
+        "tool_result": {
+            "ok": tool_result.get("ok"),
+            "query": tool_result.get("query"),
+            "scanned": tool_result.get("scanned"),
+            "important": tool_result.get("important"),
+            "already_seen": tool_result.get("already_seen"),
+            "error": (
+                (tool_result.get("error") or tool_result.get("message"))
+                if not tool_result.get("ok")
+                else None
+            ),
+            "digest": slim,
+        },
+    }
+    reply = llm_text(EMAIL_WATCH_REPLY_SYSTEM, json.dumps(payload, ensure_ascii=False))
+    if not reply.get("text"):
+        n = len(slim)
+        important = int(tool_result.get("important") or 0)
+        topic_label = topic or tool_result.get("topic")
+        if topic_label:
+            reply["text"] = (
+                f"Mình đã kiểm tra hộp thư về «{topic_label}»: "
+                f"quét {n} thư, {important} tin đáng chú ý theo bộ lọc."
+            )
+        else:
+            reply["text"] = (
+                f"Mình vừa kiểm tra hộp thư: thấy {n} thư trong khung tìm kiếm"
+                + (f", trong đó {important} tin đáng chú ý." if important else ".")
+            )
     return reply
 
 
@@ -363,6 +567,7 @@ def compose_schedule_confirm(
     state: dict[str, Any],
     run_at_unix: float,
     watch_result: dict[str, Any] | None = None,
+    kind: str = "email",
 ) -> dict[str, Any]:
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -370,8 +575,10 @@ def compose_schedule_confirm(
     tz = ZoneInfo("Asia/Ho_Chi_Minh")
     when = datetime.fromtimestamp(run_at_unix, tz).strftime("%Y-%m-%d %H:%M %Z")
     payload = {
+        "kind": kind,
+        "url": state.get("url"),
         "schedule_repeat": state.get("schedule_repeat"),
-        "schedule_time": state.get("schedule_time"),
+        "schedule_time": state.get("schedule_time") or state.get("schedule_at"),
         "schedule_weekday": state.get("schedule_weekday"),
         "schedule_date": state.get("schedule_date"),
         "run_at_local": when,
@@ -382,8 +589,20 @@ def compose_schedule_confirm(
     reply = llm_text(SCHEDULE_CONFIRM_SYSTEM, json.dumps(payload, ensure_ascii=False))
     if not reply.get("text"):
         repeat = state.get("schedule_repeat") or "once"
-        reply["text"] = (
-            f"Mình đã hẹn kiểm tra email lúc {when}"
-            + (" mỗi tuần." if repeat == "weekly" else ".")
-        )
+        if kind == "standup":
+            suffix = {
+                "daily": " mỗi ngày",
+                "weekly": " mỗi tuần",
+            }.get(str(repeat), "")
+            reply["text"] = (
+                f"Mình đã hẹn điền standup lúc **{when}**{suffix}.\n\n"
+                "- Đến giờ mình sẽ hỏi nội dung **hôm qua / hôm nay** trong chat\n"
+                "- Rồi mới mở trình duyệt điền\n"
+                "- Kết quả báo qua thông báo desktop"
+            )
+        else:
+            reply["text"] = (
+                f"Mình đã hẹn kiểm tra email lúc {when}"
+                + (" mỗi tuần." if repeat == "weekly" else ".")
+            )
     return reply

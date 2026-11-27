@@ -154,3 +154,85 @@ def list_chat(session_id: str, user_id: str, limit: int = 100) -> list[dict[str,
             item["created_at"] = str(item["created_at"])
         out.append(item)
     return out
+
+
+def end_session(session_id: str, user_id: str) -> dict[str, Any]:
+    """Soft-delete: đánh dấu ended_at, ẩn khỏi list sessions."""
+    require_user(user_id)
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE sessions
+            SET ended_at = NOW(), last_seen_at = NOW()
+            WHERE session_id = %s AND user_id = %s AND ended_at IS NULL
+            RETURNING session_id, user_id, created_at, last_seen_at, ended_at
+            """,
+            (session_id, user_id),
+        ).fetchone()
+        if row:
+            # Huỷ HITL đang mở của session
+            conn.execute(
+                """
+                UPDATE hitl_checkpoints
+                SET status = 'cancelled', updated_at = NOW()
+                WHERE session_id = %s AND status = 'interrupted'
+                """,
+                (session_id,),
+            )
+            conn.commit()
+    if not row:
+        raise HTTPException(404, "session không tồn tại hoặc đã xoá")
+    out = dict(row)
+    for k in ("created_at", "last_seen_at", "ended_at"):
+        if out.get(k):
+            out[k] = str(out[k])
+    return out
+
+
+def list_sessions(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Danh sách session của user, kèm preview tin đầu / tin cuối."""
+    require_user(user_id)
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                s.session_id,
+                s.user_id,
+                s.created_at,
+                s.last_seen_at,
+                (
+                    SELECT c.content
+                    FROM chat_history c
+                    WHERE c.session_id = s.session_id AND c.role = 'user'
+                    ORDER BY c.id ASC
+                    LIMIT 1
+                ) AS first_user_message,
+                (
+                    SELECT c.content
+                    FROM chat_history c
+                    WHERE c.session_id = s.session_id
+                    ORDER BY c.id DESC
+                    LIMIT 1
+                ) AS last_message,
+                (
+                    SELECT COUNT(*)::int
+                    FROM chat_history c
+                    WHERE c.session_id = s.session_id
+                ) AS message_count
+            FROM sessions s
+            WHERE s.user_id = %s AND s.ended_at IS NULL
+            ORDER BY s.last_seen_at DESC
+            LIMIT %s
+            """,
+            (user_id, limit),
+        ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        item = dict(r)
+        for k in ("created_at", "last_seen_at"):
+            if item.get(k):
+                item[k] = str(item[k])
+        preview = (item.get("first_user_message") or "").strip()
+        item["title"] = (preview[:48] + "…") if len(preview) > 48 else (preview or "New chat")
+        out.append(item)
+    return out

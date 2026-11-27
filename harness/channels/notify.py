@@ -1,13 +1,59 @@
-"""Ghi notification vào Postgres + file outbox (MVP báo user / desktop poll)."""
+"""Ghi notification vào Postgres + file outbox + toast desktop Windows."""
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from harness.config import ensure_dirs, settings
 from harness.db.session import get_connection
+
+
+def _escape_ps_single(s: str) -> str:
+    return (s or "").replace("'", "''")
+
+
+def _desktop_toast(title: str, body: str) -> bool:
+    """Hiện toast/balloon ngay trên desktop Windows. Trả True nếu gửi được."""
+    if sys.platform != "win32":
+        return False
+    title = (title or "digitalboo")[:120]
+    body = (body or "")[:400]
+    # Balloon tip qua NotifyIcon — không cần thư viện ngoài, chạy nền.
+    ps = f"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Information
+$n.Visible = $true
+$n.BalloonTipTitle = '{_escape_ps_single(title)}'
+$n.BalloonTipText = '{_escape_ps_single(body)}'
+$n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
+$n.ShowBalloonTip(8000)
+Start-Sleep -Milliseconds 8500
+$n.Dispose()
+"""
+    try:
+        subprocess.Popen(
+            [
+                "powershell",
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                ps,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except Exception as e:
+        print(f"[notify] desktop toast failed: {e}")
+        return False
 
 
 def push(
@@ -37,8 +83,14 @@ def push(
         f"# {title}\n\nuser: {user_id}\nkind: {kind}\n\n{body}\n",
         encoding="utf-8",
     )
-    print(f"[notify] {title} → {path}")
-    return {"id": row["id"], "path": str(path), "created_at": str(row["created_at"])}
+    desktop = _desktop_toast(title, body)
+    print(f"[notify] {title} → {path}" + (" + desktop" if desktop else ""))
+    return {
+        "id": row["id"],
+        "path": str(path),
+        "created_at": str(row["created_at"]),
+        "desktop": desktop,
+    }
 
 
 def list_notifications(

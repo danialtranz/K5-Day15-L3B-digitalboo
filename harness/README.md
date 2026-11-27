@@ -1,6 +1,6 @@
 # Harness (ngoài lát cắt CP2)
 
-Gmail OAuth + FastAPI + Postgres/Redis + Playwright standup (1 URL allowlist).
+Gmail OAuth + FastAPI + Postgres/Redis + Playwright standup (hybrid computer-use).
 
 `python run.py` / eval CP2 **không** phụ thuộc thư mục này.
 
@@ -38,7 +38,7 @@ python -m harness serve
 | Intent | Việc |
 |---|---|
 | `conversation` | Chat thường |
-| `standup_fill` | Điền standup — cần yesterday/today/url |
+| `standup_fill` | Điền standup (yesterday/today/url) hoặc **hẹn lịch daily/weekly** — đến giờ hỏi nội dung (HITL + toast), rồi mới CU |
 | `email_watch` | Đọc mail quan trọng; HITL nếu chưa Gmail; có thể **hẹn lịch** |
 
 ### Email lịch (timezone `Asia/Ho_Chi_Minh`)
@@ -56,7 +56,11 @@ Thiếu giờ/thứ/ngày → HITL (`missing_fields` chứa message LLM thân th
 
 Query mail mặc định: unread **7 ngày**; user nêu khung thời gian thì theo yêu cầu.
 
-### Desktop poll notifications
+### Desktop notifications
+
+Mỗi `notify.push` ghi Postgres + `outbox/` **và** hiện balloon tip ngay trên desktop Windows (NotifyIcon).
+
+Poll API (tuỳ chọn, app khác đọc):
 
 ```http
 GET /email/notifications?user_id=u1&unread_only=true
@@ -65,11 +69,26 @@ POST /email/notifications/{id}/read?user_id=u1
 POST /email/notifications/read-all?user_id=u1
 ```
 
-App poll 15–30s → toast/tray local. `meta.source` có thể là `scheduled_email_watch` / `ask_now`.
+### Computer-use hybrid (standup)
+
+Router trong `harness/computer_use/`:
+
+| URL | Strategy | Cách điền |
+|---|---|---|
+| Khớp playbook Edufun (`sites.yaml` → `portal-cohort5.edufun.ai` + `/my-submissions`) | **scripted** | Selector YAML (`#standup-yesterday` / `#standup-today`, ≥40 ký tự) |
+| HTTPS URL khác user cung cấp | **vision** | Screenshot → multimodal LLM → click/type (tối đa `vision.max_steps`) |
+
+Chung: Playwright mở browser → nếu cần login / chưa thấy form → **HITL `browser_login`** (giữ cửa sổ mở, user đăng nhập rồi nhắn lại) → điền form.  
+`STANDUP_ALLOWLIST_URL` vẫn là URL mặc định / grant Edufun.
+
+**Lịch daily/weekly:** payload Redis **không** lưu sẵn yesterday/today. Tới giờ → toast «cần nội dung» + HITL trong đúng `session_id` lúc hẹn → user trả lời chat → CU ngay. Không trả lời trong 2 giờ → toast bỏ lỡ; lịch ngày sau vẫn giữ.
 
 | Method | Path | Việc |
 |---|---|---|
 | POST | `/ask` | Chat + orchestrator |
+| GET | `/auth/sessions?user_id=u1` | Danh sách session chat |
+| POST | `/auth/sessions` | Tạo session mới |
+| GET | `/auth/chat/history?session_id=...&user_id=u1` | Lịch sử tin trong session |
 | GET | `/email/oauth/google/start?format=json&user_id=u1&session_id=...` | `oauth_url` popup |
 | GET | `/email/notifications` | Poll notify |
 | POST | `/email/notifications/{id}/read` | Đánh dấu đã đọc |

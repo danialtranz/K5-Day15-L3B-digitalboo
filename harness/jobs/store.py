@@ -4,17 +4,27 @@ from __future__ import annotations
 import json
 from datetime import date
 from typing import Any, Optional
-from urllib.parse import urlparse
 
 from harness.config import settings
 from harness.db.session import get_connection
 
 
 def upsert_grant(user_id: str, url: str, site_id: str = "daily_standup", allow_submit: bool = True) -> dict[str, Any]:
-    allow = settings()["standup_allowlist_url"]
-    if allow:
-        if urlparse(url).netloc.lower() != urlparse(allow).netloc.lower():
-            raise PermissionError(f"Grant URL phải cùng host allowlist ({allow})")
+    from harness.computer_use.browser import url_permitted
+    from harness.computer_use.playbook import is_safe_https_url, match_playbook, resolve_strategy
+
+    if not is_safe_https_url(url):
+        raise PermissionError("Grant URL phải là https hợp lệ (không file:/javascript:).")
+    # Edufun playbook / vision HTTPS / legacy allowlist host
+    if not url_permitted(url):
+        allow = settings()["standup_allowlist_url"]
+        raise PermissionError(f"Grant URL không được phép: {url} (allow={allow})")
+    # site_id theo playbook nếu có
+    pb = match_playbook(url)
+    if pb and pb.get("_id"):
+        site_id = str(pb["_id"])
+    elif resolve_strategy(url) == "vision":
+        site_id = site_id or "vision_standup"
     with get_connection() as conn:
         row = conn.execute(
             """

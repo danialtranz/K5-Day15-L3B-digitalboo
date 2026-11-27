@@ -25,6 +25,7 @@ from harness.hitl.slots import (
 )
 from harness.jobs.delayed import next_run_unix, parse_schedule_at, schedule_job
 from harness.memory import format_chat_history, with_history
+from harness.channels import notify as notify_mod
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "codebase") not in sys.path:
@@ -98,6 +99,7 @@ def _conversation(text: str, history_text: str = "") -> dict[str, Any]:
         "Bạn là trợ lý digitalboo thân thiện. "
         "Nhớ ngữ cảnh từ lịch sử hội thoại cùng session. "
         "Trả lời tiếng Việt, ngắn gọn. "
+        "Được dùng Markdown (in đậm, list, code inline) khi giúp đọc rõ — không bọc cả câu trả lời trong fence. "
         "Không soạn standup, không đọc email trừ khi user yêu cầu rõ trong tin hiện tại."
     )
     reply = call_model(system, with_history(history_text, text))
@@ -111,18 +113,214 @@ def _conversation(text: str, history_text: str = "") -> dict[str, Any]:
     }
 
 
-def _execute_standup(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
+def _standup_min_chars(url: str | None = None) -> int | None:
+    """Chỉ enforce min_chars khi có playbook scripted (Edufun). Vision: không chặn sớm."""
+    from harness.computer_use.playbook import match_playbook, resolve_strategy
+
+    if not url:
+        return None
+    if resolve_strategy(url) != "scripted":
+        return None
+    pb = match_playbook(url) or {}
+    try:
+        return max(1, int(pb.get("min_chars") or 40))
+    except (TypeError, ValueError):
+        return 40
+
+
+def _standup_schedule_payload(
+    user_id: str,
+    state: dict[str, Any],
+    fields: dict[str, str],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Payload Redis delayed job cho standup (có thể lặp daily/weekly)."""
+    clean = {k: v for k, v in state.items() if not str(k).startswith("_")}
+    repeat = (clean.get("schedule_repeat") or "daily").strip()
+    # daily/weekly: không đóng băng nội dung — tới giờ sẽ hỏi HITL
+    fields_out = None
+    if repeat == "once":
+        has_content = bool(
+            (fields.get("yesterday") or "").strip() and (fields.get("today") or "").strip()
+        )
+        fields_out = fields if has_content else None
+    return {
+        "user_id": user_id,
+        "session_id": session_id,
+        "fields": fields_out,
+        "url": clean.get("url"),
+        "force": True,
+        "schedule_enabled": True,
+        "schedule_repeat": repeat,
+        "schedule_time": clean.get("schedule_time") or clean.get("schedule_at"),
+        "schedule_weekday": clean.get("schedule_weekday"),
+        "schedule_date": clean.get("schedule_date"),
+        "notify_desktop": True,
+    }
+
+
+def _execute_standup(
+    user_id: str,
+    state: dict[str, Any],
+    *,
+    resume_browser: bool = False,
+    session_id: str | None = None,
+) -> dict[str, Any]:
     fields = {
         "yesterday": state.get("yesterday") or "",
         "today": state.get("today") or "",
-        "blockers": state.get("blockers") or "Không",
+        "blockers": state.get("blockers") or "",
     }
     url = state.get("url")
-    run_at = parse_schedule_at(state.get("schedule_at"), settings()["standup_timezone"])
+    clean = {k: v for k, v in state.items() if not str(k).startswith("_")}
+    # Checkpoint sau prompt lịch → luôn chạy CU ngay, không schedule lại
+    if clean.get("from_scheduled_prompt"):
+        clean["schedule_enabled"] = False
+        clean["run_now"] = True
+    tz = settings()["standup_timezone"]
+
+    # 1) Đặt lịch — không chạy ngay (trừ khi run_now=true)
+    if wants_schedule(clean):
+        # Chuẩn hóa legacy schedule_at
+        if not clean.get("schedule_time") and clean.get("schedule_at"):
+            clean["schedule_time"] = clean.get("schedule_at")
+        if not clean.get("schedule_repeat"):
+            clean["schedule_repeat"] = "daily"
+
+        run_at = next_run_unix(clean, timezone_name=tz)
+        if run_at is None:
+            # fallback one-shot HH:MM
+            run_at = parse_schedule_at(
+                clean.get("schedule_time") or clean.get("schedule_at"),
+                tz,
+            )
+        if run_at is None:
+            return {
+                "ok": False,
+                "flow": "standup_fill",
+                "scheduled": False,
+                "need_hitl": True,
+                "missing_fields": ["schedule_time"],
+                "message": "Chưa tính được thời điểm chạy. Bạn cho mình giờ (vd 20:00) rõ hơn nhé.",
+                "state": clean,
+            }
+
+        payload = _standup_schedule_payload(user_id, clean, fields, session_id=session_id)
+        job_id = schedule_job("standup_fill", payload, run_at)
+        confirm = compose_schedule_confirm(
+            state=clean,
+            run_at_unix=run_at,
+            kind="standup",
+        )
+        notify_mod.push(
+            user_id,
+            "standup_scheduled",
+            "Đã hẹn lịch standup",
+            confirm.get("text")
+            or f"Đã hẹn standup lúc {clean.get('schedule_time')} ({clean.get('schedule_repeat') or 'daily'}).",
+            {"job_id": job_id, "run_at_unix": run_at, "url": url, "session_id": session_id},
+        )
+
+        out: dict[str, Any] = {
+            "ok": True,
+            "flow": "standup_fill",
+            "scheduled": True,
+            "job_id": job_id,
+            "run_at_unix": run_at,
+            "schedule_repeat": payload.get("schedule_repeat"),
+            "message": confirm.get("text")
+            or (
+                f"Đã hẹn điền standup lúc {clean.get('schedule_time')} "
+                f"({payload.get('schedule_repeat')}). Đến giờ mình sẽ hỏi nội dung hôm qua/hôm nay rồi mới điền."
+            ),
+        }
+
+        # Chỉ chạy thêm ngay khi user explicitly run_now
+        if wants_run_now(clean):
+            need = _standup_min_chars(url if isinstance(url, str) else None)
+            short = []
+            if need is not None:
+                short = [
+                    k
+                    for k in ("yesterday", "today")
+                    if len((fields.get(k) or "").strip()) < need
+                ]
+            if short:
+                out["message"] = (
+                    (out.get("message") or "")
+                    + " Phần nội dung hôm qua/hôm nay còn ngắn nên chưa chạy ngay — đến giờ lịch sẽ dùng notes nếu có."
+                ).strip()
+            else:
+                now_result = run_standup_submit(
+                    user_id=user_id,
+                    force=True,
+                    fields=fields if (fields.get("yesterday") and fields.get("today")) else None,
+                    url=url,
+                    resume_browser=resume_browser,
+                )
+                out["ran_now"] = True
+                out["now_result"] = now_result
+                if now_result.get("need_hitl") or now_result.get("need_login"):
+                    st = dict(clean)
+                    st["browser_login_pending"] = True
+                    out.update(
+                        {
+                            "ok": False,
+                            "need_hitl": True,
+                            "missing_fields": list(now_result.get("missing_fields") or ["browser_login"]),
+                            "state": st,
+                            "error": now_result.get("error") or "need_login",
+                            "message": now_result.get("message") or out.get("message"),
+                        }
+                    )
+        return out
+
+    # 2) Chạy ngay (không có lịch)
+    need = _standup_min_chars(url if isinstance(url, str) else None)
+    if need is not None:
+        short = [
+            k
+            for k in ("yesterday", "today")
+            if len((fields.get(k) or "").strip()) < need
+        ]
+        if short:
+            labels = {"yesterday": "hôm qua", "today": "hôm nay"}
+            parts = ", ".join(
+                f"{labels[k]} ({len((fields.get(k) or '').strip())}/{need} ký tự)"
+                for k in short
+            )
+            msg = (
+                f"Portal yêu cầu mỗi ô ≥{need} ký tự. "
+                f"Phần còn ngắn: {parts}. Bạn viết dài thêm giúp mình nhé."
+            )
+            return {
+                "ok": False,
+                "flow": "standup_fill",
+                "scheduled": False,
+                "error": "fields_too_short",
+                "need_hitl": True,
+                "missing_fields": short,
+                "message": msg,
+                "state": {**clean, **fields},
+            }
+
+    # Legacy one-shot schedule_at without schedule_enabled
+    run_at = parse_schedule_at(state.get("schedule_at"), tz)
     if run_at is not None:
         job_id = schedule_job(
             "standup_fill",
-            {"user_id": user_id, "fields": fields, "url": url, "force": True},
+            _standup_schedule_payload(
+                user_id,
+                {
+                    **clean,
+                    "schedule_enabled": True,
+                    "schedule_repeat": "once",
+                    "schedule_time": state.get("schedule_at"),
+                },
+                fields,
+                session_id=session_id,
+            ),
             run_at,
         )
         return {
@@ -132,8 +330,8 @@ def _execute_standup(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
             "job_id": job_id,
             "run_at_unix": run_at,
             "message": (
-                f"Đã đủ thông tin. Đã lên lịch Redis chạy standup lúc {state.get('schedule_at')} "
-                f"(job_id={job_id})."
+                f"Đã lên lịch chạy standup lúc {state.get('schedule_at')} "
+                f"(đến giờ mới chạy)."
             ),
         }
 
@@ -142,26 +340,53 @@ def _execute_standup(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
         force=True,
         fields=fields,
         url=url,
+        resume_browser=resume_browser,
     )
-    return {
+    out = {
         "ok": result.get("ok", False),
         "flow": "standup_fill",
         "scheduled": False,
         "message": result.get("message") or result.get("error") or "",
         "detail": result,
     }
+    if result.get("need_hitl") or result.get("need_login"):
+        miss = list(result.get("missing_fields") or ["browser_login"])
+        st = dict(clean)
+        st["browser_login_pending"] = True
+        out.update(
+            {
+                "need_hitl": True,
+                "missing_fields": miss,
+                "state": st,
+                "error": result.get("error") or "need_login",
+            }
+        )
+    return out
 
 
-def _execute_email(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
+def _execute_email(
+    user_id: str,
+    state: dict[str, Any],
+    *,
+    user_text: str = "",
+    history_text: str = "",
+) -> dict[str, Any]:
     from harness.hitl.slots import build_gmail_query
 
     clean = {k: v for k, v in state.items() if not str(k).startswith("_")}
     q = build_gmail_query(clean)
     watch_result: dict[str, Any] | None = None
+    watch_kwargs = {
+        "state": clean,
+        "query": q,
+        "source": "ask_now",
+        "user_text": user_text,
+        "history_text": history_text,
+    }
 
     # 1) Chạy ngay nếu cần
     if wants_run_now(clean):
-        watch_result = run_email_watch(user_id, state=clean, query=q, source="ask_now")
+        watch_result = run_email_watch(user_id, **watch_kwargs)
 
     # 2) Đặt lịch calendar (once/weekly) nếu có
     if wants_schedule(clean):
@@ -226,7 +451,7 @@ def _execute_email(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
             time.time() + interval,
         )
         if watch_result is None:
-            watch_result = run_email_watch(user_id, state=clean, query=q, source="ask_now")
+            watch_result = run_email_watch(user_id, **watch_kwargs)
         return {
             "ok": True,
             "flow": "email_watch",
@@ -236,15 +461,19 @@ def _execute_email(user_id: str, state: dict[str, Any]) -> dict[str, Any]:
             "message": watch_result.get("message") or "",
             "watch": watch_result,
             "items": watch_result.get("items") or [],
+            "tokens_in": watch_result.get("_tokens_in"),
+            "tokens_out": watch_result.get("_tokens_out"),
         }
 
     if watch_result is None:
-        watch_result = run_email_watch(user_id, state=clean, query=q, source="ask_now")
+        watch_result = run_email_watch(user_id, **watch_kwargs)
     return {
         "ok": watch_result.get("ok", False),
         "flow": "email_watch",
         "scheduled": False,
         "message": watch_result.get("message") or watch_result.get("error") or "",
+        "tokens_in": watch_result.get("_tokens_in"),
+        "tokens_out": watch_result.get("_tokens_out"),
         **watch_result,
     }
 
@@ -374,9 +603,34 @@ def _resume_hitl(
     meta = _meta_from(merged, intent_reason="hitl_resume", resumed=True)
 
     if intent == "standup_fill":
-        miss = standup_missing(merged)
+        # User xác nhận đã đăng nhập trên browser → bỏ cờ chờ login
+        only_login = missing == ["browser_login"] or (
+            "browser_login" in missing and not any(
+                k in missing for k in ("yesterday", "today", "url")
+            )
+        )
+        if "browser_login" in missing and (text or "").strip():
+            merged.pop("browser_login_pending", None)
+            merged["_need_browser_login"] = False
+
+        # Giữ cờ prompt từ lịch (LLM merge có thể làm mất)
+        if state.get("from_scheduled_prompt"):
+            merged["from_scheduled_prompt"] = True
+            merged["schedule_enabled"] = False
+            merged["run_now"] = True
+            if not merged.get("url"):
+                merged["url"] = state.get("url")
+
+        url = merged.get("url") if isinstance(merged.get("url"), str) else None
+        miss = standup_missing(merged, min_chars=_standup_min_chars(url))
+        # Khi chỉ còn browser_login và user đã nhắn → coi như sẵn sàng resume browser
+        if only_login and (text or "").strip():
+            miss = [m for m in miss if m != "browser_login"]
+
         if miss:
             clean = {k: v for k, v in merged.items() if not str(k).startswith("_")}
+            if "browser_login" in miss:
+                clean["browser_login_pending"] = True
             cp.update_pending(pending["id"], clean, miss)
             msg = compose_hitl_message(
                 intent=intent,
@@ -397,8 +651,30 @@ def _resume_hitl(
                 "message": msg.get("text") or "",
                 **meta,
             }
-        cp.complete(pending["id"], {k: v for k, v in merged.items() if not str(k).startswith("_")})
-        out = _execute_standup(user_id, merged)
+        clean = {k: v for k, v in merged.items() if not str(k).startswith("_")}
+        clean.pop("browser_login_pending", None)
+        cp.complete(pending["id"], clean)
+        # Sau prompt lịch: đảm bảo chạy CU ngay
+        if clean.get("from_scheduled_prompt"):
+            clean["schedule_enabled"] = False
+            clean["run_now"] = True
+        out = _execute_standup(
+            user_id,
+            clean,
+            resume_browser=("browser_login" in missing or only_login),
+            session_id=session_id,
+        )
+        if out.get("need_hitl"):
+            return _hitl_interrupt(
+                session_id,
+                user_id,
+                "standup_fill",
+                out.get("state") or clean,
+                list(out.get("missing_fields") or ["browser_login"]),
+                meta,
+                user_text=text,
+                history_text=history_text,
+            )
         out.update(meta)
         return out
 
@@ -432,8 +708,12 @@ def _resume_hitl(
                 out["ui"] = {"show_connect_email": True, "provider": "google"}
             return out
         cp.complete(pending["id"], {k: v for k, v in merged.items() if not str(k).startswith("_")})
-        out = _execute_email(user_id, merged)
+        out = _execute_email(user_id, merged, user_text=text, history_text=history_text)
+        tin = (meta.get("tokens_in") or 0) + (out.get("tokens_in") or out.get("_tokens_in") or 0)
+        tout = (meta.get("tokens_out") or 0) + (out.get("tokens_out") or out.get("_tokens_out") or 0)
         out.update(meta)
+        out["tokens_in"] = tin or None
+        out["tokens_out"] = tout or None
         return out
 
     cp.complete(pending["id"])
@@ -449,7 +729,8 @@ def _start_standup(
 ) -> dict[str, Any]:
     slots = extract_standup_slots(text, history_text=history_text)
     meta = {**meta, **_meta_from(slots)}
-    miss = standup_missing(slots)
+    url = slots.get("url") if isinstance(slots.get("url"), str) else None
+    miss = standup_missing(slots, min_chars=_standup_min_chars(url))
     if miss:
         return _hitl_interrupt(
             session_id,
@@ -461,7 +742,19 @@ def _start_standup(
             user_text=text,
             history_text=history_text,
         )
-    return {**_execute_standup(user_id, slots), **meta}
+    out = _execute_standup(user_id, slots, session_id=session_id)
+    if out.get("need_hitl"):
+        return _hitl_interrupt(
+            session_id,
+            user_id,
+            "standup_fill",
+            out.get("state") or slots,
+            list(out.get("missing_fields") or ["browser_login"]),
+            {**meta, **{k: v for k, v in out.items() if k in ("message",)}},
+            user_text=text,
+            history_text=history_text,
+        )
+    return {**out, **meta}
 
 
 def _start_email(
@@ -486,7 +779,11 @@ def _start_email(
             user_text=text,
             history_text=history_text,
         )
-    return {**_execute_email(user_id, slots), **meta}
+    out = _execute_email(user_id, slots, user_text=text, history_text=history_text)
+    tin = (meta.get("tokens_in") or 0) + (out.get("tokens_in") or out.get("_tokens_in") or 0)
+    tout = (meta.get("tokens_out") or 0) + (out.get("tokens_out") or out.get("_tokens_out") or 0)
+    merged = {**out, **meta, "tokens_in": tin or None, "tokens_out": tout or None}
+    return merged
 
 
 def handle(

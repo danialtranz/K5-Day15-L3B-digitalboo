@@ -76,12 +76,32 @@ def oauth_callback(
     bundle.email_address = email
     upsert_account(user_id, "google", bundle)
 
-    # Auto-resume HITL email_watch → đọc mail quan trọng
-    resume = resume_email_after_oauth(
-        user_id=user_id,
-        session_id=session_id,
-        checkpoint_id=checkpoint_id,
-    )
+    # Grant đã OK — quét mail có thể fail (vd Gmail API chưa bật) nhưng không được 500 popup
+    resume: dict = {
+        "ok": True,
+        "flow": "email_oauth",
+        "message": f"Đã kết nối Gmail ({email or 'ok'}).",
+        "granted": True,
+    }
+    try:
+        resume = resume_email_after_oauth(
+            user_id=user_id,
+            session_id=session_id,
+            checkpoint_id=checkpoint_id,
+        )
+        resume["granted"] = True
+    except Exception as e:
+        resume = {
+            "ok": False,
+            "flow": "email_oauth",
+            "granted": True,
+            "error": "watch_after_oauth_failed",
+            "message": (
+                f"Đã kết nối Gmail ({email or 'ok'}) nhưng chưa đọc được hộp thư: {e}. "
+                "Hãy bật Gmail API trên Google Cloud (APIs & Services → Library → Gmail API → Enable), "
+                "rồi nhắn lại trong chat để quét mail."
+            ),
+        }
 
     # Ghi vào chat history nếu có session
     if session_id:
@@ -94,6 +114,7 @@ def oauth_callback(
                 flow=resume.get("flow") or "email_watch",
                 meta={
                     "ok": resume.get("ok"),
+                    "granted": resume.get("granted"),
                     "resumed_from_oauth": True,
                     "important": resume.get("important"),
                 },
@@ -104,15 +125,16 @@ def oauth_callback(
     resume_js = json.dumps(resume, ensure_ascii=False, default=str)
     msg = resume.get("message") or "Gmail connected."
     important = resume.get("important")
+    title = "Gmail đã kết nối" if resume.get("granted") else "Gmail"
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Gmail connected</title></head>
+<html><head><meta charset="utf-8"><title>{title}</title></head>
 <body style="font-family:sans-serif;padding:2rem;max-width:40rem">
-  <h1>Gmail đã kết nối</h1>
+  <h1>{title}</h1>
   <p>user_id=<b>{user_id}</b></p>
   <p>email=<b>{email or "unknown"}</b></p>
   <p>{msg}</p>
   <p>{"Tin quan trọng: " + str(important) if important is not None else ""}</p>
-  <p><small>Có thể đóng cửa sổ này — agent đã tiếp tục đọc email.</small></p>
+  <p><small>Có thể đóng cửa sổ này.</small></p>
   <script>
     (function () {{
       var payload = {resume_js};
