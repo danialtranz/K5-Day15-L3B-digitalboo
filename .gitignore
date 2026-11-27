@@ -5,6 +5,9 @@
 *.pem
 *service-account*.json
 credentials*.json
+# Harness local state
+harness/state/
+outbox/
 # File sinh ra khi chạy
 __pycache__/
 *.pyc

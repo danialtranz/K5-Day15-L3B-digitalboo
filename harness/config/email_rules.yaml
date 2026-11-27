@@ -1,0 +1,16 @@
+# Heuristic lọc mail quan trọng (MVP). Có thể bổ sung LLM sau.
+important_keywords:
+  - urgent
+  - khẩn
+  - deadline
+  - standup
+  - meeting
+  - họp
+  - asap
+  - action required
+  - cần phản hồi
+from_domains_boost:
+  - github.com
+  - google.com
+max_body_chars: 2000
+max_messages_per_watch: 20

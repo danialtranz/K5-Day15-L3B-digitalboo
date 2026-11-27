@@ -1,0 +1,8 @@
+timezone: Asia/Ho_Chi_Minh
+email_watch:
+  interval_sec: 300
+standup:
+  window_start: "00:01"
+  window_end: "09:00"
+  # Chạy kiểm tra mỗi N giây trong ngày; chỉ submit khi trong cửa sổ + có grant.
+  check_interval_sec: 60

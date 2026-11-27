@@ -72,9 +72,9 @@ flowchart LR
   | G8/G9 — dễ sửa | User sửa draft trước khi nộp |
   | G11 — giải thích | Từ chối kèm hướng đúng (để notes / tự nộp) |
 
-- **Còn giả (CP2):** model `fake` · notes/policy synthetic trong `data/` · chưa computer-use · chưa email/Outlook
+- **Còn giả (CP2):** model `fake` · notes/policy synthetic trong `data/` · lát cắt eval chưa computer-use · chưa email trong `answer()`
 
-- **Roadmap (không nằm trong lát cắt CP2):** computer-use **chỉ** điền web daily standup; email/Outlook để hỏi lịch / bot nhắc; hai kiểu (user chủ động / bot chủ động).
+- **Roadmap / harness ngoài CP2** (thư mục `harness/`, FastAPI + Postgres/Redis Docker): Gmail OAuth đọc mail quan trọng → notify; computer-use Playwright **chỉ** 1 URL standup (user tự login) → điền + Submit; cron scheduler. Outlook OAuth để sau.
 
 ## §5. Chỗ khó — 4 lớp + ≥6 kịch bản + 2 tấn công *(guide 2.3)*
 
@@ -121,3 +121,4 @@ flowchart LR
 | Thời điểm | Đổi gì | Vì sao |
 |---|---|---|
 | 2026-11-27 CP2 | Chốt lát cắt notes→draft; §7 = 60% + 100% tu_choi; roadmap CU chỉ standup | Pain P1 + giảm rủi ro điểm |
+| 2026-11-27 | Thêm `harness/`: FastAPI, Docker Postgres+Redis (port non-default localhost), Gmail OAuth, CU standup grant/submit; CP2 không đổi | Roadmap sản phẩm thật tách eval |
