@@ -1,10 +1,74 @@
 const { app, BrowserWindow, ipcMain, Notification } = require('electron')
 const path = require('path')
+const { spawn } = require('child_process')
+const fs = require('fs')
+const os = require('os')
 
 const isDev = !app.isPackaged
+const WIN_TOAST_APP_ID = 'digitalboo.demo'
+
+// Windows: cần AppUserModelId khớp toast AppId
+if (process.platform === 'win32') {
+  app.setAppUserModelId(WIN_TOAST_APP_ID)
+}
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null
+
+function escapeXml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Toast thật ra Action Center / góc màn hình Windows 10/11. */
+function showWindowsDesktopToast(title, body) {
+  if (process.platform !== 'win32') return false
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<toast activationType="foreground">
+  <visual>
+    <binding template="ToastGeneric">
+      <text>${escapeXml(title)}</text>
+      <text>${escapeXml(body)}</text>
+    </binding>
+  </visual>
+</toast>`
+  const tmp = path.join(os.tmpdir(), `digitalboo-toast-${Date.now()}.xml`)
+  try {
+    fs.writeFileSync(tmp, xml, 'utf8')
+    const tmpPs = tmp.replace(/'/g, "''")
+    const ps = `
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
+$xml = Get-Content -LiteralPath '${tmpPs}' -Raw -Encoding UTF8
+$doc = New-Object Windows.Data.Xml.Dom.XmlDocument
+$doc.LoadXml($xml)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($doc)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('${WIN_TOAST_APP_ID}')
+$notifier.Show($toast)
+Start-Sleep -Milliseconds 400
+Remove-Item -LiteralPath '${tmpPs}' -Force -ErrorAction SilentlyContinue
+`
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', ps],
+      { detached: true, stdio: 'ignore', windowsHide: true },
+    )
+    child.unref()
+    return true
+  } catch (e) {
+    console.error('[notify] Windows desktop toast failed', e)
+    try {
+      fs.unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
+    return false
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -57,12 +121,20 @@ ipcMain.handle('window:close', () => {
 })
 
 ipcMain.handle('app:notify', (_event, payload) => {
-  const title = String(payload?.title || 'Haven')
-  const body = String(payload?.body || '')
-  if (!Notification.isSupported()) return false
-  const n = new Notification({ title, body, silent: false })
-  n.show()
-  return true
+  const title = String(payload?.title || 'digitalboo')
+  const body = String(payload?.body || 'Có thông báo mới')
+  // Ưu tiên toast desktop Windows (ra ngoài app)
+  const desktop = showWindowsDesktopToast(title, body)
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title, body, silent: false })
+      n.show()
+    }
+  } catch (e) {
+    console.error('[notify] Electron Notification failed', e)
+  }
+  console.log('[notify] desktop=', desktop, title, body)
+  return desktop
 })
 
 app.whenReady().then(() => {

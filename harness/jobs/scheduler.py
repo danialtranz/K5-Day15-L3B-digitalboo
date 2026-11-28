@@ -43,28 +43,39 @@ def _reschedule_standup(payload: dict) -> None:
 def _notify_standup_job(uid: str, result: dict) -> None:
     """Luôn báo desktop sau job lịch — một lần duy nhất (submit chạy silent)."""
     from harness.channels import notify as notify_mod
+    from harness.hitl.slots import compose_standup_reply
+
+    fields = {
+        k: result[k]
+        for k in ("yesterday", "today", "blockers")
+        if result.get(k)
+    }
+    composed = compose_standup_reply(tool_result=result, fields=fields or None)
+    msg = (composed.get("text") or "").strip() or str(
+        result.get("message") or result.get("error") or ""
+    )
 
     if result.get("ok"):
         notify_mod.push(
             uid,
             "standup_ok",
             "Standup theo lịch — thành công",
-            result.get("message") or "Đã điền và nộp standup theo lịch.",
+            msg,
             result.get("detail") or result,
         )
         return
 
     kind = "standup_fail"
     title = "Standup theo lịch — thất bại"
-    if result.get("need_login") or result.get("error") == "need_login":
+    err = result.get("error")
+    if result.get("need_login") or err == "need_login":
         kind = "standup_login"
         title = "Standup theo lịch — cần đăng nhập"
-    elif result.get("error") == "no_notes":
+    elif err == "no_notes":
         title = "Standup theo lịch — thiếu nội dung"
-    elif result.get("error") == "already_done":
+    elif err == "already_done":
         title = "Standup theo lịch — đã nộp hôm nay"
-    msg = result.get("message") or result.get("error") or "Standup theo lịch chưa hoàn tất."
-    notify_mod.push(uid, kind, title, str(msg), result)
+    notify_mod.push(uid, kind, title, msg, result)
 
 
 def _handle_standup_due(uid: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -228,14 +239,8 @@ def execute_delayed_job(job: dict[str, Any], *, source: str = "scheduler") -> di
                 "job_type": jtype,
                 "result": result,
             }
-            _email_job_outcome(
-                uid,
-                job_type=jtype,
-                job_id=job_id,
-                ok=ok,
-                result=result,
-                source=source,
-            )
+            # Không gửi email báo cáo cho chính job đọc email → tránh vòng lặp
+            # (report → inbox → “mail quan trọng” → notify lại).
             return out
 
         out = {
@@ -292,11 +297,24 @@ def _run_delayed_jobs() -> None:
 
 
 def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = None) -> None:
-    """Poll Redis delayed jobs. once=True chạy 1 vòng; có stop_event để dừng background."""
+    """Poll Redis delayed jobs. once=True chạy 1 vòng; có stop_event để dừng background.
+
+    Background email_watch chỉ chạy khi interval_sec > 0 (mặc định 0 = tắt).
+    User muốn đọc mail → bảo trong chat hoặc đặt lịch email_watch tường minh.
+    """
     s = settings()
     sched = load_yaml("schedule.yaml")
-    email_every = int((sched.get("email_watch") or {}).get("interval_sec") or s["email_watch_interval_sec"])
-    print(f"[scheduler] delayed jobs + optional email every {email_every}s")
+    raw_interval = (sched.get("email_watch") or {}).get("interval_sec")
+    if raw_interval is None:
+        raw_interval = s["email_watch_interval_sec"]
+    try:
+        email_every = int(raw_interval)
+    except (TypeError, ValueError):
+        email_every = 0
+    if email_every > 0:
+        print(f"[scheduler] delayed jobs + background email every {email_every}s")
+    else:
+        print("[scheduler] delayed jobs only (background email OFF — chỉ chạy khi user hỏi/lịch)")
     last_email = 0.0
     while True:
         if stop_event is not None and stop_event.is_set():
@@ -310,7 +328,8 @@ def run_scheduler(once: bool = False, stop_event: Optional[threading.Event] = No
                 release_lock("lock:sched:delayed")
 
         now = time.time()
-        if email_every < 86400 * 365 and now - last_email >= email_every:
+        # interval_sec <= 0 → không tự đọc email nền
+        if email_every > 0 and now - last_email >= email_every:
             if acquire_lock("lock:sched:email", ttl_sec=min(email_every, 120)):
                 try:
                     print("[scheduler] background email…", run_email_watch(source="background"))

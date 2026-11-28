@@ -60,10 +60,7 @@ def prompt_standup_content(
         history_text="",
         state=state,
     )
-    text = msg.get("text") or (
-        "Đến giờ standup rồi — bạn cho mình biết hôm qua đã làm gì và hôm nay sẽ làm gì "
-        "(mỗi phần nên ≥40 ký tự nếu nộp portal Edufun) nhé."
-    )
+    text = (msg.get("text") or "").strip()
 
     try:
         # Tin user giả để sidebar hiện tiêu đề rõ (không phải "New chat")
@@ -157,27 +154,32 @@ def expire_standup_content_prompt(
     state["expired"] = True
     cp.complete(pending["id"], state)
 
-    msg = (
-        "Đã hết thời gian chờ nội dung standup (2 giờ). "
-        "Hôm nay mình bỏ qua lần điền này; lịch ngày sau vẫn giữ."
+    composed = compose_hitl_message(
+        intent="standup_fill",
+        missing=["yesterday", "today"],
+        user_text="",
+        history_text="",
+        state={**state, "_expired_timeout": True, "url": url},
     )
-    try:
-        append_chat(
-            session_id,
-            user_id,
-            "assistant",
-            msg,
-            flow="standup_prompt_timeout",
-            meta={"checkpoint_id": pending.get("id"), "url": url},
-        )
-    except Exception as e:
-        print(f"[standup_prompt] timeout append_chat error: {e}")
+    msg = (composed.get("text") or "").strip()
+    if msg:
+        try:
+            append_chat(
+                session_id,
+                user_id,
+                "assistant",
+                msg,
+                flow="standup_prompt_timeout",
+                meta={"checkpoint_id": pending.get("id"), "url": url},
+            )
+        except Exception as e:
+            print(f"[standup_prompt] timeout append_chat error: {e}")
 
     notify_mod.push(
         user_id,
         "standup_missed",
         "Bỏ lỡ standup hôm nay",
-        msg,
+        msg or "Hết hạn chờ nội dung standup.",
         {"session_id": session_id, "checkpoint_id": pending.get("id"), "url": url},
     )
     return {"ok": True, "expired": True, "checkpoint_id": pending.get("id"), "message": msg}

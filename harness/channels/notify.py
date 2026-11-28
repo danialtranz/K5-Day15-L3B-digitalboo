@@ -16,31 +16,55 @@ def _escape_ps_single(s: str) -> str:
     return (s or "").replace("'", "''")
 
 
+def _escape_xml(s: str) -> str:
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def _desktop_toast(title: str, body: str) -> bool:
-    """Hiện toast/balloon ngay trên desktop Windows. Trả True nếu gửi được."""
+    """Toast Action Center Windows 10/11 (ra ngoài app). Balloon tip cũ Win11 thường không hiện."""
     if sys.platform != "win32":
         return False
-    title = (title or "digitalboo")[:120]
-    body = (body or "")[:400]
-    # Balloon tip qua NotifyIcon — không cần thư viện ngoài, chạy nền.
-    ps = f"""
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$n = New-Object System.Windows.Forms.NotifyIcon
-$n.Icon = [System.Drawing.SystemIcons]::Information
-$n.Visible = $true
-$n.BalloonTipTitle = '{_escape_ps_single(title)}'
-$n.BalloonTipText = '{_escape_ps_single(body)}'
-$n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
-$n.ShowBalloonTip(8000)
-Start-Sleep -Milliseconds 8500
-$n.Dispose()
-"""
+    title = _escape_xml((title or "digitalboo")[:120])
+    body = _escape_xml((body or "")[:400])
+    app_id = "digitalboo.demo"
+    xml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        "<toast activationType=\"foreground\">"
+        "<visual><binding template=\"ToastGeneric\">"
+        f"<text>{title}</text><text>{body}</text>"
+        "</binding></visual></toast>"
+    )
+    ensure_dirs()
+    outbox = Path(settings()["outbox_dir"])
+    tmp = outbox / f"_toast-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.xml"
     try:
+        tmp.write_text(xml, encoding="utf-8")
+        tmp_ps = _escape_ps_single(str(tmp.resolve()))
+        ps = f"""
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
+$xml = Get-Content -LiteralPath '{tmp_ps}' -Raw -Encoding UTF8
+$doc = New-Object Windows.Data.Xml.Dom.XmlDocument
+$doc.LoadXml($xml)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($doc)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}')
+$notifier.Show($toast)
+Start-Sleep -Milliseconds 400
+Remove-Item -LiteralPath '{tmp_ps}' -Force -ErrorAction SilentlyContinue
+"""
         subprocess.Popen(
             [
-                "powershell",
+                "powershell.exe",
                 "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
                 "-WindowStyle",
                 "Hidden",
                 "-Command",
@@ -53,6 +77,10 @@ $n.Dispose()
         return True
     except Exception as e:
         print(f"[notify] desktop toast failed: {e}")
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
         return False
 
 
@@ -109,13 +137,15 @@ def list_notifications(
         params.append(since_id)
     where = " AND ".join(clauses)
     params.append(limit)
+    # Poll với since_id: cũ → mới. Lần đầu (không since_id): mới nhất trước (để app seed cursor, không spam toast lịch sử).
+    order = "ASC" if since_id is not None else "DESC"
     with get_connection() as conn:
         rows = conn.execute(
             f"""
             SELECT id, kind, title, body, meta, created_at, read_at
             FROM notifications
             WHERE {where}
-            ORDER BY id ASC
+            ORDER BY id {order}
             LIMIT %s
             """,
             tuple(params),

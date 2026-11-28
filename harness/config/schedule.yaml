@@ -1,6 +1,7 @@
 timezone: Asia/Ho_Chi_Minh
 email_watch:
-  interval_sec: 300
+  # 0 = tắt tự quét nền. Chỉ đọc email khi user hỏi trong chat hoặc đặt lịch tường minh.
+  interval_sec: 0
 standup:
   window_start: "00:01"
   window_end: "09:00"

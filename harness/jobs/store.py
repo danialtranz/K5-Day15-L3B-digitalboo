@@ -74,16 +74,35 @@ def record_job(
     artifact_path: Optional[str] = None,
     day_key: Optional[str] = None,
 ) -> dict[str, Any]:
+    """Ghi job_runs. status=ok dùng upsert vì unique (user_id, job_type, day_key) khi ok."""
     day_key = day_key or date.today().isoformat()
+    payload = (user_id, job_type, day_key, status, json.dumps(detail or {}), artifact_path)
     with get_connection() as conn:
-        row = conn.execute(
-            """
-            INSERT INTO job_runs (user_id, job_type, day_key, status, detail, artifact_path)
-            VALUES (%s, %s, %s, %s, %s::jsonb, %s)
-            RETURNING id, created_at
-            """,
-            (user_id, job_type, day_key, status, json.dumps(detail or {}), artifact_path),
-        ).fetchone()
+        if status == "ok" and day_key is not None:
+            # Partial unique index job_runs_dedupe — nộp lại trong ngày thì cập nhật bản ok
+            row = conn.execute(
+                """
+                INSERT INTO job_runs (user_id, job_type, day_key, status, detail, artifact_path)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+                ON CONFLICT (user_id, job_type, day_key)
+                    WHERE day_key IS NOT NULL AND status = 'ok'
+                DO UPDATE SET
+                    detail = EXCLUDED.detail,
+                    artifact_path = EXCLUDED.artifact_path,
+                    created_at = NOW()
+                RETURNING id, created_at
+                """,
+                payload,
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                INSERT INTO job_runs (user_id, job_type, day_key, status, detail, artifact_path)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+                RETURNING id, created_at
+                """,
+                payload,
+            ).fetchone()
         conn.commit()
     return dict(row)
 

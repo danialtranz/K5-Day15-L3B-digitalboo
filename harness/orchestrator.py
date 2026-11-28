@@ -15,6 +15,7 @@ from harness.hitl import checkpoint as cp
 from harness.hitl.slots import (
     compose_hitl_message,
     compose_schedule_confirm,
+    compose_standup_reply,
     email_missing,
     extract_email_slots,
     extract_standup_slots,
@@ -203,12 +204,38 @@ def _standup_schedule_payload(
     }
 
 
+def _with_standup_reply(
+    out: dict[str, Any],
+    *,
+    fields: dict[str, Any],
+    user_text: str = "",
+    history_text: str = "",
+) -> dict[str, Any]:
+    """Gắn message chat bằng LLM — không dùng template if/else."""
+    composed = compose_standup_reply(
+        tool_result=out,
+        user_text=user_text,
+        history_text=history_text,
+        fields=fields,
+    )
+    text = (composed.get("text") or "").strip()
+    if text:
+        out["message"] = text
+    if composed.get("_tokens_in"):
+        out["tokens_in"] = (out.get("tokens_in") or 0) + (composed.get("_tokens_in") or 0)
+    if composed.get("_tokens_out"):
+        out["tokens_out"] = (out.get("tokens_out") or 0) + (composed.get("_tokens_out") or 0)
+    return out
+
+
 def _execute_standup(
     user_id: str,
     state: dict[str, Any],
     *,
     resume_browser: bool = False,
     session_id: str | None = None,
+    user_text: str = "",
+    history_text: str = "",
 ) -> dict[str, Any]:
     fields = {
         "yesterday": state.get("yesterday") or "",
@@ -239,13 +266,20 @@ def _execute_standup(
                 tz,
             )
         if run_at is None:
+            hitl = compose_hitl_message(
+                intent="standup_fill",
+                missing=["schedule_time"],
+                user_text=user_text,
+                history_text=history_text,
+                state=clean,
+            )
             return {
                 "ok": False,
                 "flow": "standup_fill",
                 "scheduled": False,
                 "need_hitl": True,
                 "missing_fields": ["schedule_time"],
-                "message": "Chưa tính được thời điểm chạy. Bạn cho mình giờ (vd 20:00) rõ hơn nhé.",
+                "message": hitl.get("text") or "",
                 "state": clean,
             }
 
@@ -260,8 +294,7 @@ def _execute_standup(
             user_id,
             "standup_scheduled",
             "Đã hẹn lịch standup",
-            confirm.get("text")
-            or f"Đã hẹn standup lúc {clean.get('schedule_time')} ({clean.get('schedule_repeat') or 'daily'}).",
+            confirm.get("text") or "",
             {"job_id": job_id, "run_at_unix": run_at, "url": url, "session_id": session_id},
         )
 
@@ -272,11 +305,7 @@ def _execute_standup(
             "job_id": job_id,
             "run_at_unix": run_at,
             "schedule_repeat": payload.get("schedule_repeat"),
-            "message": confirm.get("text")
-            or (
-                f"Đã hẹn điền standup lúc {clean.get('schedule_time')} "
-                f"({payload.get('schedule_repeat')}). Đến giờ mình sẽ hỏi nội dung hôm qua/hôm nay rồi mới điền."
-            ),
+            "message": confirm.get("text") or "",
         }
 
         # Chỉ chạy thêm ngay khi user explicitly run_now
@@ -290,10 +319,17 @@ def _execute_standup(
                     if len((fields.get(k) or "").strip()) < need
                 ]
             if short:
-                out["message"] = (
-                    (out.get("message") or "")
-                    + " Phần nội dung hôm qua/hôm nay còn ngắn nên chưa chạy ngay — đến giờ lịch sẽ dùng notes nếu có."
-                ).strip()
+                hitl = compose_hitl_message(
+                    intent="standup_fill",
+                    missing=short,
+                    user_text=user_text,
+                    history_text=history_text,
+                    state={**clean, **fields, "_min_chars": need},
+                )
+                if hitl.get("text"):
+                    out["message"] = (
+                        ((out.get("message") or "") + "\n\n" + hitl["text"]).strip()
+                    )
             else:
                 now_result = run_standup_submit(
                     user_id=user_id,
@@ -301,9 +337,22 @@ def _execute_standup(
                     fields=fields if (fields.get("yesterday") and fields.get("today")) else None,
                     url=url,
                     resume_browser=resume_browser,
+                    allow_resubmit=True,
                 )
                 out["ran_now"] = True
                 out["now_result"] = now_result
+                out["detail"] = now_result
+                out["ok"] = bool(now_result.get("ok"))
+                out["error"] = now_result.get("error")
+                out["need_login"] = now_result.get("need_login")
+                out["need_hitl"] = now_result.get("need_hitl")
+                out["missing_fields"] = now_result.get("missing_fields")
+                out = _with_standup_reply(
+                    out,
+                    fields=fields,
+                    user_text=user_text,
+                    history_text=history_text,
+                )
                 if now_result.get("need_hitl") or now_result.get("need_login"):
                     st = dict(clean)
                     st["browser_login_pending"] = True
@@ -311,10 +360,11 @@ def _execute_standup(
                         {
                             "ok": False,
                             "need_hitl": True,
-                            "missing_fields": list(now_result.get("missing_fields") or ["browser_login"]),
+                            "missing_fields": list(
+                                now_result.get("missing_fields") or ["browser_login"]
+                            ),
                             "state": st,
                             "error": now_result.get("error") or "need_login",
-                            "message": now_result.get("message") or out.get("message"),
                         }
                     )
         return out
@@ -328,14 +378,12 @@ def _execute_standup(
             if len((fields.get(k) or "").strip()) < need
         ]
         if short:
-            labels = {"yesterday": "hôm qua", "today": "hôm nay"}
-            parts = ", ".join(
-                f"{labels[k]} ({len((fields.get(k) or '').strip())}/{need} ký tự)"
-                for k in short
-            )
-            msg = (
-                f"Portal yêu cầu mỗi ô ≥{need} ký tự. "
-                f"Phần còn ngắn: {parts}. Bạn viết dài thêm giúp mình nhé."
+            hitl = compose_hitl_message(
+                intent="standup_fill",
+                missing=short,
+                user_text=user_text,
+                history_text=history_text,
+                state={**clean, **fields, "_min_chars": need},
             )
             return {
                 "ok": False,
@@ -344,7 +392,7 @@ def _execute_standup(
                 "error": "fields_too_short",
                 "need_hitl": True,
                 "missing_fields": short,
-                "message": msg,
+                "message": hitl.get("text") or "",
                 "state": {**clean, **fields},
             }
 
@@ -366,16 +414,18 @@ def _execute_standup(
             ),
             run_at,
         )
+        confirm = compose_schedule_confirm(
+            state={**clean, "schedule_repeat": "once", "schedule_time": state.get("schedule_at")},
+            run_at_unix=run_at,
+            kind="standup",
+        )
         return {
             "ok": True,
             "flow": "standup_fill",
             "scheduled": True,
             "job_id": job_id,
             "run_at_unix": run_at,
-            "message": (
-                f"Đã lên lịch chạy standup lúc {state.get('schedule_at')} "
-                f"(đến giờ mới chạy)."
-            ),
+            "message": confirm.get("text") or "",
         }
 
     result = run_standup_submit(
@@ -384,14 +434,25 @@ def _execute_standup(
         fields=fields,
         url=url,
         resume_browser=resume_browser,
+        allow_resubmit=True,
     )
     out = {
         "ok": result.get("ok", False),
         "flow": "standup_fill",
         "scheduled": False,
+        "error": result.get("error"),
+        "need_login": result.get("need_login"),
+        "need_hitl": result.get("need_hitl"),
+        "missing_fields": result.get("missing_fields"),
         "message": result.get("message") or result.get("error") or "",
         "detail": result,
     }
+    out = _with_standup_reply(
+        out,
+        fields=fields,
+        user_text=user_text,
+        history_text=history_text,
+    )
     if result.get("need_hitl") or result.get("need_login"):
         miss = list(result.get("missing_fields") or ["browser_login"])
         st = dict(clean)
@@ -435,11 +496,18 @@ def _execute_email(
     if wants_schedule(clean):
         run_at = next_run_unix(clean)
         if run_at is None:
+            hitl = compose_hitl_message(
+                intent="email_watch",
+                missing=["schedule_time"],
+                user_text=user_text,
+                history_text=history_text,
+                state=clean,
+            )
             return {
                 "ok": False,
                 "flow": "email_watch",
                 "scheduled": False,
-                "message": "Chưa tính được thời điểm chạy lịch. Bạn cho mình giờ/ngày rõ hơn nhé.",
+                "message": hitl.get("text") or "",
                 "query": q,
                 "watch": watch_result,
             }
@@ -454,7 +522,9 @@ def _execute_email(
             "schedule_date": clean.get("schedule_date"),
         }
         job_id = schedule_job("email_watch", payload, run_at)
-        confirm = compose_schedule_confirm(state=clean, run_at_unix=run_at, watch_result=watch_result)
+        confirm = compose_schedule_confirm(
+            state=clean, run_at_unix=run_at, watch_result=watch_result
+        )
         out: dict[str, Any] = {
             "ok": True,
             "flow": "email_watch",
@@ -706,6 +776,8 @@ def _resume_hitl(
             clean,
             resume_browser=("browser_login" in missing or only_login),
             session_id=session_id,
+            user_text=text,
+            history_text=history_text,
         )
         if out.get("need_hitl"):
             return _hitl_interrupt(
@@ -785,7 +857,13 @@ def _start_standup(
             user_text=text,
             history_text=history_text,
         )
-    out = _execute_standup(user_id, slots, session_id=session_id)
+    out = _execute_standup(
+        user_id,
+        slots,
+        session_id=session_id,
+        user_text=text,
+        history_text=history_text,
+    )
     if out.get("need_hitl"):
         return _hitl_interrupt(
             session_id,
