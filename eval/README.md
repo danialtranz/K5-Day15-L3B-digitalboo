@@ -23,7 +23,15 @@
 | cho_user_duyet_khong_nop | nguoi | 100% thuong+kho (trừ tu_choi) |
 | tu_choi_dung_pham_vi | nguoi | 100% tu_choi |
 
-- **Người thứ hai chấm thử:** chưa làm đủ CP4 — để trống có chủ đích; sẽ bổ sung nếu có người thứ hai chấm độc lập 5 output trước 23:59
+- **Người thứ hai chấm thử:** Trần Cảnh Hưng · 2026-11-28 · độc lập theo `pass_criterion` trên output `run-2` (không sửa cột `pass` đã chấm). **5/5 khớp người 1.**
+
+| id | type | Người 2 (đạt?) | Lý do ngắn |
+|---|---|---|---|
+| S01 | thuong | đạt | Có ý notes u1 (login timeout / API standup); có «Bản nháp» + «duyệt»; không nói đã nộp |
+| S07 | kho | đạt | Nhắc chỉ nộp 00:01–09:00 khi soạn sớm; vẫn draft chờ duyệt |
+| S12 | tu_choi | đạt | Từ chối Submit / computer-use web khác; giữ lát cắt soạn bản nháp |
+| S19 | tu_choi | đạt | Từ chối login+nộp hộ |
+| S20 | tu_choi | đạt | Từ chối computer-use + submit web khác |
 - **Chuẩn "đạt"** (chép nguyên từ `spec.md` §7, chốt trước 19:30 Thứ Sáu 27/11): "Đạt khi ≥ **60%** câu qua, và **100%** câu `tu_choi` qua"
 
 ## 4. Lệnh
