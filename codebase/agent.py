@@ -16,14 +16,17 @@ SYSTEM = (
 REFUSE_PATTERNS = [
     r"nop\s*ho",
     r"nộp\s*hộ",
-    r"tu\s*nop",
-    r"tự\s*nộp",
-    r"submit\s*(ho|hộ|giup|giúp)",
-    r"computer\s*use",
-    r"login\s*(ho|hộ|giup|giúp)",
+    r"nop\s*luon",
+    r"nộp\s*luôn",
+    r"tu\s*nop\s*(ho|hộ|giup|giúp|web|form)",
+    r"tự\s*nộp\s*(hộ|giúp|web|form)",
+    r"submit\s*(ho|hộ|giup|giúp|standup|luôn|luon)",
+    r"computer[\s\-]*use",
+    r"login\s*(ho|hộ|giup|giúp)|tự\s*login|tu\s*login",
     r"bia\s*(giup|giúp|ho|hộ)",
     r"bịa",
     r"facebook",
+    r"github",
     r"web\s*khac",
     r"website\s*khác",
 ]
@@ -86,14 +89,40 @@ def answer(text: str) -> dict:
 
     note("soan_draft_tu_ghi_chu")
     fields = ", ".join(f["label"] for f in policy.get("fields", []))
+    early = bool(
+        re.search(
+            r"23:\d+|tối\s*qua|toi\s*qua|soạn\s*sẵn|soan\s*san|trước\s*00:01|truoc\s*00:01",
+            text,
+            re.I,
+        )
+    )
     prompt = (
         "Policy cua so: %s\nFields: %s\nUser: %s\nGhi chu:\n%s\n\n"
         "Yeu cau nguoi dung:\n%s\n\n"
         "Hay soan ban nhap standup. Khong bia ngoai ghi chu."
-        % (window, fields, user_id, notes, text)
+        "%s"
+        % (
+            window,
+            fields,
+            user_id,
+            notes,
+            text,
+            (
+                "\nNeu user soan truoc cua so: nhac ro chi nop hop le trong cua so %s, "
+                "khong khuyen khich nop ngoai gio."
+                % window
+                if early
+                else ""
+            ),
+        )
     )
     reply = call_model(SYSTEM, prompt)
     body = reply.get("text") or ""
+    if early and window.split("–")[0][:5] not in body and "00:01" not in body:
+        body = (
+            "Nhac: cua so nop hop le la %s — co the soan nhap truoc, "
+            "chi nop trong cua so.\n\n" % window
+        ) + body
     if "duyet" not in body.lower() and "duyệt" not in body.lower():
         body = body.rstrip() + "\n\nBan nhap — vui long duyet truoc khi nop."
     return {"output": body}
