@@ -10,7 +10,7 @@
 | `cost/cost-estimate.md` 3 kịch bản + $/task | ✅ simulate-1 · 50 phiên |
 | `spec.md` đủ §0–§9 · impact có nguồn | ✅ |
 | `demo-slides.pdf` thư mục gốc | ✅ |
-| Video demo dự phòng | ✅ `asset/demo-backup.mp4` + link public trong `README.md` (raw GitHub `feat/agent`) |
+| Video demo dự phòng | ✅ `asset/digitalboo-demo-ai20k.mp4` + link public trong `README.md` (raw GitHub `feat/agent`) |
 | *(Bonus)* `validation/log.md` | ❌ chưa làm (≥2 người ngoài nhóm) |
 
 ## Điều kiện cứng (rubric Phần 0)

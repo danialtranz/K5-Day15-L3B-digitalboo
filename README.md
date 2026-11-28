@@ -124,5 +124,5 @@ Nhóm dùng **Cursor/Codex** hỗ trợ code agent, benchmark, slide và gợi �
 | 4 | Bản chạy thử làm trọn lát cắt | `codebase/` · lệnh ở mục "Lệnh" |
 | 5 | Định nghĩa "tốt" + bộ câu thử | `data/DATA_CARD.md` · `eval/` |
 | 6 | Mô phỏng chi phí khi dùng thật | `cost/` |
-| 7 | Slide + demo + video dự phòng | `demo-slides.pdf` ở thư mục gốc · file local: `asset/demo-backup.mp4` · link video (public, cửa sổ ẩn danh): https://github.com/danialtranz/K5-Day15-L3B-digitalboo/raw/feat/agent/asset/demo-backup.mp4 |
+| 7 | Slide + demo + video dự phòng | `demo-slides.pdf` ở thư mục gốc · file local: `asset/digitalboo-demo-ai20k.mp4` · link video (public, cửa sổ ẩn danh): https://github.com/danialtranz/K5-Day15-L3B-digitalboo/raw/feat/agent/asset/digitalboo-demo-ai20k.mp4 |
 | + | *Bonus:* người dùng thử | `validation/log.md` |

@@ -39,7 +39,7 @@ evidence/**/raw-*
 data-btc
 data-btc/
 
-# Clip thô / VO lớn — không commit; chỉ nộp video dự phòng nhỏ
+# Clip thô / VO lớn — không commit; chỉ nộp video demo dự phòng
 asset/*
-!asset/demo-backup.mp4
+!asset/digitalboo-demo-ai20k.mp4
 !asset/prompt.md
