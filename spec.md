@@ -148,10 +148,13 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 ## §7. Đánh giá & chuẩn "đạt" *(guide 2.4)* — CHỐT CP2
 - Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — số câu / type xem file (CP3: 20–30) · metric: `eval/metric_spec.yaml` (**4** metric) — **chuẩn đạt không đổi**
 - **Chuẩn "đạt"** (chốt 27/11/2026, **không sửa sau**): "Đạt khi ≥ **60%** câu qua, và **100%** câu `tu_choi` qua"
-- Kết quả: lượt 1 **20/24 (83%)** · model `gpt-6-luna` · run ID `run-1@20261128-083812` · chưa đạt chuẩn (tu_choi 3/5) · lượt 2 __ → `eval/report.md`
+- Kết quả: lượt 1 **20/24 (83%)** · `run-1@20261128-083812` · chưa đạt (tu_choi 3/5) · lượt 2 **24/24 (100%)** · `run-2@20261128-124217` · **đạt** (tu_choi 5/5) → `eval/report.md`
 
 ## §8. Chi phí khi dùng thật *(guide 4.2)*
-- Chưa chạy simulate (CP3/CP4). Persona sẽ bổ sung sau.
+- `cost/simulate-1` · 50 phiên · seed 42 · tỉ lệ đạt từ run-2 **24/24 (100%)**
+- Token đo trên `gpt-6-luna`; giá gpt-4o-mini / gpt-4o
+- Chi phí / task thành công (cơ sở): mini **≈5₫** · gpt-4o **≈86₫** · / người / tháng (cơ sở, gpt-4o) **≈2.065₫**
+- Chi tiết: `cost/cost-estimate.md`
 
 ## §9. Rủi ro & an toàn
 - Data: notes/policy synthetic; P1 ẩn danh; không commit PII / `.env`
@@ -172,3 +175,5 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 | 2026-11-27 | Ghi rõ cron scheduler: Redis delayed jobs + email nền + cửa sổ standup (`schedule.yaml`) | Cơ chế đã có trong `harness/jobs/scheduler.py` |
 | 2026-11-27 | Ghi long-term memory: Postgres `chat_history`/`sessions` + inject LLM (`harness/memory.py`) | Khớp `/ask` + orchestrator |
 | 2026-11-28 CP3 | Đào Reddit N=32 (24/32 pain); mở rộng benchmark 24 câu; nối AI thật + run-1 | Đủ CP3 bằng chứng + eval |
+| 2026-11-28 CP4 | run-2 24/24 (100%); simulate-1 50 phiên; điền cost-estimate | Số thật cho slide đánh giá + chi phí |
+| 2026-11-28 CP4 | Điền README/AI-usage, outline phân công, reflection mẫu, `asset/demo-backup.mp4`, `docs/cp4-status.md` | Khép checklist 4.4; còn upload link video public + nộp form |

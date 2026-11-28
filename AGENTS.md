@@ -40,6 +40,6 @@ Khung chỉ dùng thư viện chuẩn của Python. Thêm thư viện thì ghi v
 
 ## Quy ước của nhóm
 
-- Ngôn ngữ trả lời người dùng: __
-- Phong cách code / đặt tên: __
-- Ai duyệt thay đổi do agent tạo trước khi commit: __
+- Ngôn ngữ trả lời người dùng: tiếng Việt (standup draft có thể song ngữ nếu notes tiếng Việt)
+- Phong cách code / đặt tên: snake_case Python · giữ hợp đồng `answer` / `call_model` / `@tool`
+- Ai duyệt thay đổi do agent tạo trước khi commit: Trần Cảnh Hưng (đội trưởng); file evidence do Duy; eval/slide do Nhân

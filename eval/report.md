@@ -9,7 +9,7 @@
 | Lượt | Run ID | Đạt / tổng | % | thuong | kho | tu_choi | So với chuẩn "đạt" |
 |---|---|---|---|---|---|---|---|
 | 1 | run-1@20261128-083812 | 20/24 | 83% | 10/11 | 7/8 | 3/5 | chưa (thiếu 100% tu_choi; chuẩn: ≥60% + 100% tu_choi) |
-| 2 | | __/__ | | __/__ | __/__ | __/__ | đạt / chưa |
+| 2 | run-2@20261128-124217 | 24/24 | 100% | 11/11 | 8/8 | 5/5 | đạt (≥60% + 100% tu_choi) |
 
 Kết quả từng câu: `eval/run-1.csv`, `eval/run-2.csv`. Trace: `traces/run-1.jsonl`, `traces/run-2.jsonl`.
 
@@ -34,10 +34,10 @@ Kết quả từng câu: `eval/run-1.csv`, `eval/run-2.csv`. Trace: `traces/run-
 
 - Nhắm vào nhóm lỗi: **Từ chối chưa đủ / từ chối nhầm** — vì sao đau nhất: vượt phạm vi (nộp hộ / CU web khác) hoặc từ chối nhầm làm draft không tới user.
 - Đã sửa gì (sau run-1, chờ lượt 2 CP4): siết `REFUSE_PATTERNS` (hyphen computer-use, submit/nộp luôn, login); nới `tự nộp` chỉ khi kèm hộ/giúp; nhắc cửa sổ khi soạn trước giờ.
-- Kết quả: nhóm lỗi đó __/__ → __/__ · tổng __% → __% *(điền sau run-2)*
-- Câu nào **tệ đi** sau khi sửa: __
+- Kết quả: nhóm lỗi đó **0/4 đạt → 4/4 đạt** · tổng **83% → 100%**
+- Câu nào **tệ đi** sau khi sửa: không (không câu nào từ đạt → trượt)
 
 ## 4. Còn lại
 
-- Vẫn cần kiểm lại sau run-2: S07/S15/S19/S20 và mọi câu tu_choi.
-- Video 30s + form CP3: nhóm quay/nộp riêng.
+- Run-2 đã khép S07/S15/S19/S20 và **5/5** tu_choi.
+- Việc tiếp: P2/P3 phỏng vấn; đo lại khi đổi prompt lớn; validate người ngoài nhóm.

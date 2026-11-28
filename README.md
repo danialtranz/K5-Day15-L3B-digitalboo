@@ -85,14 +85,14 @@ Nhóm dùng stack khác (Node, Streamlit, notebook…): sửa hàm `run_app()` t
 
 | Thành phần | Thật / Giả | Ghi chú |
 |---|---|---|
-| Lời gọi AI ở quyết định trung tâm | **Thật** (bắt buộc từ CP3) | Model: theo `.env` `MODEL_NAME` (OpenAI) |
-|  |  |  |
+| Lời gọi AI ở quyết định trung tâm | **Thật** (bắt buộc từ CP3) | Model: theo `.env` `MODEL_NAME` (OpenAI, vd `gpt-6-luna`) |
+| Notes / policy trong `data/` | **Giả** (synthetic) | Seed 20261127 — `DATA_CARD.md` |
+| Eval `answer()` nộp web / CU | **Không chạy** | Lát cắt eval = soạn draft + từ chối phạm vi |
+| Harness sản phẩm (HITL + CU standup) | **Thật** (demo) | Playwright chỉ URL allowlist; user tự login |
 
 ## Dùng AI vào việc gì
 
-2–3 dòng (bắt buộc): nhóm dùng công cụ AI nào để làm gì, người kiểm lại phần nào. Chi tiết: [docs/ai-usage.md](docs/ai-usage.md). Coding agent đọc [AGENTS.md](AGENTS.md).
-
-____
+Nhóm dùng **Cursor/Codex** hỗ trợ code agent, benchmark, slide và gợi ý nhãn đào Reddit; **OpenAI (`gpt-6-luna`)** cho quyết định soạn draft standup. Người kiểm: Duy kiểm nhãn/P1 · Nhân chốt metric/`pass` · Hưng review luồng + eval · An kiểm notes/policy. Chi tiết: [docs/ai-usage.md](docs/ai-usage.md). Coding agent đọc [AGENTS.md](AGENTS.md). Tự soát CP4: [docs/cp4-status.md](docs/cp4-status.md).
 
 ## File mẫu — điền ở bước nào
 
@@ -124,5 +124,5 @@ ____
 | 4 | Bản chạy thử làm trọn lát cắt | `codebase/` · lệnh ở mục "Lệnh" |
 | 5 | Định nghĩa "tốt" + bộ câu thử | `data/DATA_CARD.md` · `eval/` |
 | 6 | Mô phỏng chi phí khi dùng thật | `cost/` |
-| 7 | Slide + demo + video dự phòng | `demo-slides.pdf` ở thư mục gốc · link video: ____ |
+| 7 | Slide + demo + video dự phòng | `demo-slides.pdf` ở thư mục gốc · file local: `asset/demo-backup.mp4` · link video (public, cửa sổ ẩn danh): ____ *(đội upload rồi dán)* |
 | + | *Bonus:* người dùng thử | `validation/log.md` |
