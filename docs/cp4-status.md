@@ -10,7 +10,7 @@
 | `cost/cost-estimate.md` 3 kịch bản + $/task | ✅ simulate-1 · 50 phiên |
 | `spec.md` đủ §0–§9 · impact có nguồn | ✅ |
 | `demo-slides.pdf` thư mục gốc | ✅ |
-| Video demo dự phòng | ⚠️ `asset/demo-backup.mp4` (~64s, ghép 4 clip feature) — **cần upload Drive/YouTube + dán link public** vào `README.md` |
+| Video demo dự phòng | ✅ `asset/digitalboo-demo-ai20k.mp4` + link public trong `README.md` (raw GitHub `feat/agent`) |
 | *(Bonus)* `validation/log.md` | ❌ chưa làm (≥2 người ngoài nhóm) |
 
 ## Điều kiện cứng (rubric Phần 0)
@@ -24,14 +24,14 @@
 
 ## Tự khai — phần chưa xong / yếu
 
-1. **Video dự phòng public link** — chưa dán (cần Nhân/Hưng upload Drive hoặc YouTube, mở được cửa sổ ẩn danh).
+1. **Video dự phòng public link** — ✅ đã dán raw GitHub vào `README.md`.
 2. **Phỏng vấn P2/P3** — mới **1/3** (P1); pain vẫn đạt ngưỡng nhờ Reddit.
-3. **Người thứ hai chấm thử 5 output** — `eval/README.md` chưa điền khớp __/5.
-4. **Bonus validation** — `validation/log.md` trống.
-5. **Reflection cá nhân** — hạn 23:59 (sau CP4); đã có file mẫu theo tên trong `reflection/`.
+3. **Người thứ hai chấm thử 5 output** — ✅ 5/5 khớp (`eval/README.md`).
+4. **Bonus validation** — chưa chạy ≥2 người ngoài nhóm; `validation/log.md` ghi rõ không bịa.
+5. **Reflection cá nhân** — ✅ đủ 4 file trước 23:59.
 
-## Việc thủ công còn lại trước demo
+## Việc thủ công còn lại (Giai đoạn 5)
 
-1. Upload `asset/demo-backup.mp4` (hoặc bản voice-over theo `asset/prompt.md`) → dán link vào `README.md`.
-2. Đội trưởng **nộp form CP4** bằng mã `2A202603759`.
-3. Gọi thử 1 câu AI trong ~1 giờ trước giờ demo · phân công nói slide đã ghi ở `slides/outline.md`.
+1. Push `feat/agent` để link raw mở được cửa sổ ẩn danh (đã trỏ README → `feat/agent`).
+2. (Bonus, nếu kịp) ≥2 người ngoài nhóm → `validation/log.md`.
+3. (Tuỳ chọn) Merge `feat/agent` → `main` sau hạn nếu BTC chấm trên `main`.

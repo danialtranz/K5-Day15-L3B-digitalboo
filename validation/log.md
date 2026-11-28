@@ -6,15 +6,13 @@
 
 | Người thử (vai) | Việc giao (theo kết quả, không theo nút) | Quan sát (làm gì đầu tiên, chỗ do dự, chỗ hiểu sai) | Trích nguyên văn | Mức nghiêm trọng (cao / vừa / thấp) |
 |---|---|---|---|---|
-| | | | | |
-| | | | | |
-| | | | | |
+| — | — | — | — | — |
 
-Câu hỏi sau: *"Nếu mai không được dùng nữa, bạn thấy: rất tiếc / hơi tiếc / không sao?"* → __ / __ / __
+Câu hỏi sau: *"Nếu mai không được dùng nữa, bạn thấy: rất tiếc / hơi tiếc / không sao?"* → 0 / 0 / 0
 
 ## Tổng hợp
 
-- Chủ đề lặp nhiều nhất: __
-- Sửa gì trước demo (ghi `spec.md` §10): __
-- Giữ gì và vì sao: __
-- Để dành sau: __
+- Chủ đề lặp nhiều nhất: *(không có — bonus chưa chạy)*
+- Sửa gì trước demo (ghi `spec.md` §10): **Không sửa theo validation** — chưa có ≥2 người ngoài nhóm dùng thử trước 23:59; **không bịa** phiên thử.
+- Giữ gì và vì sao: Giữ bản CP4 (HITL + CU allowlist + eval 24/24 + cost simulate-1). Lý do: thiếu thời gian / người ngoài nhóm sau demo; bịa log sẽ vi phạm luật bằng chứng.
+- Để dành sau: Tuyển ≥2 thành viên team standup (ngoài nhóm) chạy 5 nhịp guide 4.3; ghi quan sát + 1 thay đổi vào §10 nếu có.
