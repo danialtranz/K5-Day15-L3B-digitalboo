@@ -85,7 +85,7 @@ Nhóm dùng stack khác (Node, Streamlit, notebook…): sửa hàm `run_app()` t
 
 | Thành phần | Thật / Giả | Ghi chú |
 |---|---|---|
-| Lời gọi AI ở quyết định trung tâm | **Thật** (bắt buộc từ CP3) | Model: ____ |
+| Lời gọi AI ở quyết định trung tâm | **Thật** (bắt buộc từ CP3) | Model: theo `.env` `MODEL_NAME` (OpenAI) |
 |  |  |  |
 
 ## Dùng AI vào việc gì

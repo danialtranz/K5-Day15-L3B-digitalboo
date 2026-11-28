@@ -14,20 +14,20 @@ Data BTC cấp đã dùng: không (Track F)
 - Việc họ cố làm xong: nộp form standup (hôm qua / hôm nay) đúng cửa sổ giờ
 - Hôm nay họ giải bằng: Discord + tự nhớ — hỏng vì kênh không chính + giờ nộp trùng ngủ
 - Pain (KHÔNG chữ AI): thành viên team — phải nộp standup 00:01–9h — hay quên / không làm trước được — nộp trễ hoặc bỏ lỡ
-- Bằng chứng: đã hỏi **P1** (1 người) — gặp pain cửa sổ giờ + quên dù có Discord. Chi tiết `evidence/interviews/P1.md`. Sẽ hỏi thêm P2/P3.
+- Bằng chứng: **đào Reddit đạt ngưỡng** — 24/32 (75%) thread pain liên quan quên cửa sổ sáng / muốn nhắc / muốn tự động (`evidence/data-mining.md`, xem 2026-11-28). Kiểm lại bằng **P1** (form web 00:01–9h + Discord không đủ) — `evidence/interviews/P1.md`. Tổng hợp: `evidence/summary.md`.
 
 ## §2. Impact & quyết định chọn *(guide 1.3)*
 
 | Hướng | Bao nhiêu người gặp | Bao nhiêu lần / tháng | Mỗi lần tốn gì | Impact / tháng | Làm kịp không | Chọn? |
 |---|---|---|---|---|---|---|
-| Prompt → HITL đủ slot → CU điền + Submit **chỉ** form standup (allowlist 1 URL); user tự login | ≥1 (P1); ước team nhỏ 5–15 *(tự ước tính)* | ~20–30 lần / người / tháng (mỗi sáng kể cả CN) *(tự ước tính từ P1)* | 5–15 phút stress + mở form *(tự ước tính)* | cao về số lần lặp | có (harness) | **Có — sản phẩm `harness/`** |
-| Nhắc + soạn draft từ ghi chú, user duyệt rồi tự nộp | cùng | cùng | thấp hơn CU | trung | có | **Có — lát cắt eval CP2** (`codebase/`) |
-| Chỉ báo thức / Discord mạnh hơn | cùng nhóm | cùng | thấp hơn nếu nhớ | thấp nếu kênh sai | có | Không — P1: Discord không đủ |
+| Prompt → HITL đủ slot → CU điền + Submit **chỉ** form standup (allowlist 1 URL); user tự login | Reddit 24/32 pain liên quan; P1 có pain; ước cohort 5–15 *(tự ước tính)* | ~20–30 lần / người / tháng (mỗi sáng kể cả CN) *(tự ước tính từ P1)* | 5–15 phút stress + mở form *(tự ước tính)* | cao về số lần lặp | có (harness) | **Có — sản phẩm `harness/`** |
+| Nhắc + soạn draft từ ghi chú, user duyệt rồi tự nộp | cùng (Reddit muốn nhắc 9/32 + AI/bot 7/32; P1) | cùng | thấp hơn CU | trung | có | **Có — lát cắt eval** (`codebase/`) |
+| Chỉ báo thức / Discord mạnh hơn | cùng nhóm | cùng | thấp hơn nếu nhớ | thấp nếu kênh sai | có | Không — P1: Discord không đủ; Reddit vẫn xin bot/reminder |
 | Tự nộp hộ / computer-use **mọi** web ngay | cùng | cùng | rủi ro nộp sai | rủi ro cao | khó an toàn | Không — chỉ 1 URL standup |
 
-- **Impact / tháng** hướng chọn ≈ 10 người × 25 lần × 8 phút = **2000 phút** — thừa số *(tự ước tính)*; cập nhật sau P2/P3
+- **Impact / tháng** hướng chọn ≈ 10 người × 25 lần × 8 phút = **2000 phút** — người & phút *(tự ước tính)*; lần/tháng từ P1 “mỗi sáng kể cả CN”; tỉ lệ pain Reddit 24/32 làm nguồn kiểm có người gặp
 - Hướng ĐÃ LOẠI: chỉ báo thức; CU mọi web
-- Số lần / tháng: ~20–30 standup / người *(tự ước tính từ P1 “mỗi sáng kể cả CN”)*
+- Số lần / tháng: ~20–30 standup / người *(tự ước tính từ P1)*
 
 ## §3. Giải pháp tương tự *(guide 2.1)*
 - Discord scheduled messages / reminder bot: học được nhắc theo giờ · né kênh không phải nơi user sống · mình khác: lấy nội dung từ **prompt/slot** user, không chỉ ping
@@ -146,9 +146,9 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 - Đặc thù: cửa sổ 00:01–9h + CN; Discord không đủ; email_watch định kỳ qua cron; **long-term memory** theo session (Postgres)
 
 ## §7. Đánh giá & chuẩn "đạt" *(guide 2.4)* — CHỐT CP2
-- Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — **12** câu (thuong **4** · kho **5** · tu_choi **3**) · metric: `eval/metric_spec.yaml` (**4** metric)
+- Data card: `data/DATA_CARD.md` · bộ câu thử: `eval/benchmark.csv` — số câu / type xem file (CP3: 20–30) · metric: `eval/metric_spec.yaml` (**4** metric) — **chuẩn đạt không đổi**
 - **Chuẩn "đạt"** (chốt 27/11/2026, **không sửa sau**): "Đạt khi ≥ **60%** câu qua, và **100%** câu `tu_choi` qua"
-- Kết quả: lượt 1 __/__ · lượt 2 __/__ — run ID: __ → `eval/report.md`
+- Kết quả: lượt 1 **20/24 (83%)** · model `gpt-6-luna` · run ID `run-1@20261128-083812` · chưa đạt chuẩn (tu_choi 3/5) · lượt 2 __ → `eval/report.md`
 
 ## §8. Chi phí khi dùng thật *(guide 4.2)*
 - Chưa chạy simulate (CP3/CP4). Persona sẽ bổ sung sau.
@@ -171,3 +171,4 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 | 2026-11-27 | Cập nhật §2–§6, §9: sản phẩm = HITL slot + CU điền/Submit standup (khớp `harness/`); giữ §7 + eval draft | Spec khớp code đang viết |
 | 2026-11-27 | Ghi rõ cron scheduler: Redis delayed jobs + email nền + cửa sổ standup (`schedule.yaml`) | Cơ chế đã có trong `harness/jobs/scheduler.py` |
 | 2026-11-27 | Ghi long-term memory: Postgres `chat_history`/`sessions` + inject LLM (`harness/memory.py`) | Khớp `/ask` + orchestrator |
+| 2026-11-28 CP3 | Đào Reddit N=32 (24/32 pain); mở rộng benchmark 24 câu; nối AI thật + run-1 | Đủ CP3 bằng chứng + eval |
