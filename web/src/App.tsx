@@ -36,6 +36,7 @@ import {
   Link2,
   ChevronUp,
   Play,
+  Bell,
 } from "lucide-react";
 import { MarkdownBody } from "./MarkdownBody";
 import {
@@ -157,7 +158,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  const [banner, setBanner] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showJobs, setShowJobs] = useState(false);
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
@@ -250,16 +250,28 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const notifSeeded = { current: false };
     const tick = async () => {
       try {
         const { items } = await listNotifications({
-          sinceId: lastNotifId.current || undefined,
+          sinceId: notifSeeded.current ? lastNotifId.current : undefined,
         });
-        if (cancelled || !items?.length) return;
+        if (cancelled) return;
+        // Lần đầu: chỉ seed cursor tới id mới nhất — không toast lại lịch sử khi mở app
+        if (!notifSeeded.current) {
+          notifSeeded.current = true;
+          if (items?.length) {
+            lastNotifId.current = Math.max(
+              lastNotifId.current,
+              ...items.map((n) => n.id),
+            );
+          }
+          return;
+        }
+        if (!items?.length) return;
         for (const n of items) {
           if (n.id <= lastNotifId.current) continue;
           lastNotifId.current = Math.max(lastNotifId.current, n.id);
-          setBanner(`${n.title}: ${n.body}`);
           void api?.notify?.(n.title, n.body);
           const sid =
             typeof n.meta?.session_id === "string" ? n.meta.session_id : null;
@@ -320,7 +332,6 @@ export default function App() {
         void refreshSessions(sid);
       }
       const msg = data.message || "Gmail connected.";
-      setBanner(typeof msg === "string" ? msg : "Gmail đã kết nối.");
       void api?.notify?.("Gmail connected", String(msg));
     };
     window.addEventListener("message", onMessage);
@@ -372,7 +383,6 @@ export default function App() {
     try {
       await disconnectGmail();
       await refreshEmailStatus();
-      setBanner("Đã ngắt kết nối Gmail.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -425,18 +435,11 @@ export default function App() {
         (typeof out.session_id === "string" ? out.session_id : null);
       if (sid && (result?.awaiting_content || out.awaiting_content)) {
         setShowJobs(false);
-        setBanner(
-          result?.message ||
-            out.message ||
-            "Đã mở chat mới — hãy trả lời hôm qua / hôm nay tại đây.",
-        );
         // Luôn refresh + loadHistory (kể cả sid trùng) để hiện câu hỏi HITL
         await refreshSessions(sid);
         setActiveSessionId(sid);
         await loadHistory(sid);
         inputRef.current?.focus();
-      } else {
-        setBanner(out.message || (out.ok ? "Đã chạy job." : "Job chạy xong."));
       }
       void refreshJobs();
     } catch (e) {
@@ -1030,9 +1033,36 @@ export default function App() {
           </div>
 
           <div
-            className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center"
+            className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5"
             style={noDrag}
           >
+            <IconButton
+              label="Thử thông báo desktop"
+              onClick={() => {
+                void (async () => {
+                  const title = "digitalboo";
+                  const body = "Có thông báo mới";
+                  if (!api?.notify) {
+                    setError(
+                      "Chạy bằng Electron (npm run electron:dev) — không mở Vite trên trình duyệt.",
+                    );
+                    return;
+                  }
+                  try {
+                    const ok = await api.notify(title, body);
+                    if (!ok) {
+                      setError(
+                        "Windows không gửi được toast — tắt Focus Assist / cho phép thông báo ứng dụng.",
+                      );
+                    }
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  }
+                })();
+              }}
+            >
+              <Bell className="h-3.5 w-3.5" strokeWidth={ICON} />
+            </IconButton>
             <IconButton label="Minimize" onClick={() => void api?.minimize()}>
               <Minus className="h-3.5 w-3.5" strokeWidth={ICON} />
             </IconButton>
@@ -1046,20 +1076,6 @@ export default function App() {
         </header>
 
         <div className="flex flex-1 flex-col overflow-y-auto px-6 pt-2 pb-4">
-          {banner && (
-            <div
-              className="mx-auto mb-4 flex w-full max-w-2xl items-start gap-2 rounded-2xl bg-white/80 px-3.5 py-2.5 text-[13px] text-[var(--ink)] ring-1 ring-black/[0.06] animate-fade-up"
-              title={banner}
-            >
-              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" strokeWidth={ICON} />
-              <span className="min-w-0 flex-1 truncate">
-                {banner.length > 50 ? `${banner.slice(0, 50)}…` : banner}
-              </span>
-              <IconButton label="Dismiss" onClick={() => setBanner(null)}>
-                <X className="h-3.5 w-3.5" strokeWidth={ICON} />
-              </IconButton>
-            </div>
-          )}
           {error && (
             <div className="mx-auto mb-4 w-full max-w-2xl rounded-2xl bg-rose-50 px-3.5 py-2.5 text-[13px] text-rose-700 ring-1 ring-rose-100">
               {error}

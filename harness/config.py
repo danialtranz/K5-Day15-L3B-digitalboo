@@ -41,7 +41,7 @@ def settings() -> dict[str, Any]:
         / (_env("PLAYWRIGHT_USER_DATA_DIR", "harness/state/browser") or "harness/state/browser"),
         "playwright_headless": (_env("PLAYWRIGHT_HEADLESS", "0") or "0") == "1",
         "login_wait_timeout_sec": int(_env("LOGIN_WAIT_TIMEOUT_SEC", "300") or "300"),
-        "email_watch_interval_sec": int(_env("EMAIL_WATCH_INTERVAL_SEC", "300") or "300"),
+        "email_watch_interval_sec": int(_env("EMAIL_WATCH_INTERVAL_SEC", "0") or "0"),
         "standup_timezone": _env("STANDUP_TIMEZONE", "Asia/Ho_Chi_Minh"),
         "mem0_api_key": _env("MEM0_API_KEY", ""),
         "mem0_enabled": (_env("MEM0_ENABLED", "1") or "1") == "1",

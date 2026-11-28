@@ -75,10 +75,12 @@ def run_standup_submit(
     resume_browser: bool = False,
     notify: bool = True,
     await_login: bool = False,
+    allow_resubmit: bool = False,
 ) -> dict[str, Any]:
     """
     await_login=True: dùng cho job lịch — nếu cần đăng nhập thì chờ trên cửa sổ
     (kèm toast), không trả HITL chat (vì không có session user đang chat).
+    allow_resubmit=True: bỏ qua dedupe already_done (user chat yêu cầu điền lại).
     """
     from harness.jobs.store import upsert_grant
 
@@ -95,32 +97,35 @@ def run_standup_submit(
 
     grant = get_grant(user_id)
     if not grant and not url:
-        msg = "Chưa có grant/URL standup."
-        _toast("standup_need_grant", "Cần grant standup", msg)
+        msg = "no_grant"
+        _toast("standup_need_grant", "Cần grant standup", "Chưa có URL standup.")
         return {"ok": False, "error": "no_grant", "message": msg, "need_hitl": True, "missing_fields": ["url"]}
 
     if not force and not _in_window():
-        msg = "Ngoài cửa sổ standup 00:01–09:00 (dùng force=true / schedule để chạy)."
-        return {"ok": False, "error": "outside_window", "message": msg}
+        return {"ok": False, "error": "outside_window", "message": "outside_window"}
 
-    if already_done(user_id, "standup_submit"):
-        return {"ok": False, "error": "already_done", "message": "Đã nộp standup hôm nay."}
+    # Job lịch giữ dedupe; chat user yêu cầu điền → allow_resubmit bỏ qua
+    if not allow_resubmit and already_done(user_id, "standup_submit"):
+        return {"ok": False, "error": "already_done", "message": "already_done"}
 
     lock_key = f"lock:standup:{user_id}"
     if not acquire_lock(lock_key, ttl_sec=600):
-        return {"ok": False, "error": "locked", "message": "Job standup đang chạy."}
+        return {"ok": False, "error": "locked", "message": "locked"}
 
     worker = get_worker()
     try:
         data = fields or _load_fields_from_notes(user_id)
         if not data:
-            msg = "Thiếu nội dung standup (hôm qua / hôm nay). Không bịa, không submit."
-            _toast("standup_need_notes", "Thiếu notes", msg)
+            _toast(
+                "standup_need_notes",
+                "Thiếu notes",
+                "Thiếu nội dung standup (hôm qua / hôm nay).",
+            )
             record_job(user_id, "standup_submit", "skipped", {"reason": "no_notes"})
             return {
                 "ok": False,
                 "error": "no_notes",
-                "message": msg,
+                "message": "no_notes",
                 "need_hitl": True,
                 "missing_fields": ["yesterday", "today"],
             }
@@ -264,7 +269,10 @@ def run_standup_submit(
         return {
             "ok": True,
             "flow": "standup_submit",
-            "message": f"Đã điền và Submit standup ({strategy}).",
+            "submitted": True,
+            "strategy": strategy,
+            "url": result.get("url"),
+            "message": "submitted",
             "detail": result,
         }
     finally:

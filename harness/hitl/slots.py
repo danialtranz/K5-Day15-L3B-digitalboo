@@ -80,7 +80,8 @@ Nếu thiếu kết nối email: mời người dùng bấm nút kết nối Gma
 Nếu thiếu lịch (giờ / thứ trong tuần / ngày): hỏi tự nhiên phần còn thiếu để hẹn giờ.
 Nếu thiếu thông tin standup (hôm qua / hôm nay / URL): hỏi tự nhiên những phần còn thiếu.
 Nếu still_needed có browser_login: bảo người dùng đăng nhập trên cửa sổ trình duyệt vừa mở (GitHub/Google/portal), xong thì nhắn lại (vd «đã đăng nhập») để mình tiếp tục điền form. Không yêu cầu gửi mật khẩu trong chat.
-Nhắc nhẹ mỗi ô hôm qua/hôm nay nên ≥40 ký tự (theo form portal) khi sắp điền ngay.
+Nhắc nhẹ mỗi ô hôm qua/hôm nay nên ≥40 ký tự (theo form portal) khi sắp điền ngay; nếu known_state có _min_chars thì nêu đúng ngưỡng đó.
+Nếu known_state._expired_timeout: báo đã hết thời gian chờ nội dung standup, bỏ qua lần này, lịch ngày sau vẫn giữ.
 Không liệt kê bullet máy móc trừ khi thật cần. Không thêm lời dẫn kiểu "Thiếu thông tin — …".
 Chỉ trả về nội dung tin nhắn, không JSON, không markdown fence."""
 
@@ -90,15 +91,30 @@ Nhắc nhẹ: đến giờ hệ thống mới chạy; kết quả (thành công/
 Nếu đồng thời đã chạy ngay, nhắc ngắn kết quả. Chỉ trả về nội dung tin nhắn."""
 
 EMAIL_WATCH_REPLY_SYSTEM = """Bạn là trợ lý digitalboo. Nhiệm vụ: viết tin nhắn trả lời user SAU KHI đã chạy tool đọc email (Gmail hoặc Outlook).
-Chỉ dựa trên tool_result (digest mail thật). Không bịa mail, người gửi, hay nội dung không có trong dữ liệu.
+Chỉ dựa trên tool_result. Không bịa mail, người gửi, hay nội dung không có trong dữ liệu.
+Hai danh sách trong tool_result:
+- digest / topic_matches: thư khớp chủ đề tìm kiếm (có thể rỗng).
+- recent_digest: thư gần đây trong cùng khung thời gian (ngữ cảnh hộp thư) — dùng khi topic không khớp.
 Trả lời đúng câu hỏi user:
-- Nếu hỏi về chủ đề cụ thể (topic/search): nói rõ CÓ / KHÔNG thấy mail khớp; nếu có thì nêu 1–3 thư liên quan (người gửi + tiêu đề + ý ngắn).
-- Nếu quét chung / mail quan trọng: tóm tắt những thư quan trọng hoặc đáng chú ý; bỏ qua spam/promo ồn ào trừ khi user hỏi sale.
-- Nếu hộp thư toàn promo và không khớp chủ đề: nói thẳng không thấy tin liên quan, có thể nhắc ngắn đang thấy chủ yếu quảng cáo.
+- Nếu hỏi về chủ đề cụ thể (topic/search, vd IELTS / kết quả thi):
+  1) Mở đầu nói rõ CÓ hoặc KHÔNG thấy mail khớp chủ đề đó (dựa vào digest / topic_match_count).
+  2) Nếu CÓ: nêu 1–3 thư khớp (người gửi + tiêu đề + ý ngắn).
+  3) Nếu KHÔNG / digest rỗng: BẮT BUỘC lấy 1–3 thư từ recent_digest (ưu tiên important=true, rồi thư không phải quảng cáo). Câu kiểu: «Không thấy email kết quả IELTS trong … ngày gần đây; trong hộp thư mình thấy …». Nếu recent_digest cũng rỗng mới nói hộp thư trống trong khung đó.
+- Nếu user cũng hỏi mail quan trọng: nêu thư important=true từ digest hoặc recent_digest.
 - Có thể nhắc nhẹ nguồn (Gmail / Outlook) nếu tool_result.provider có.
 Giọng tiếng Việt tự nhiên, 2–8 câu hoặc list ngắn. Markdown nhẹ (in đậm, list) OK.
-Không jargon (không nói heuristic, keyword rule, query, already_seen, digest, Graph API).
-Không dump nguyên danh sách 20 mail promo. Không mở đầu kiểu "Đã quét N mail (query: …)".
+Không jargon (không nói heuristic, keyword rule, query, already_seen, digest, Graph API, recent_digest).
+Không nói «chưa có email nào được trả về» nếu recent_digest còn thư. Không dump 20 mail promo.
+Chỉ trả về nội dung tin nhắn, không JSON, không markdown fence."""
+
+STANDUP_REPLY_SYSTEM = """Bạn là trợ lý digitalboo. Viết ĐÚNG một tin nhắn tiếng Việt SAU KHI hệ thống đã thử điền / nộp daily standup trên web.
+Chỉ dựa trên tool_result + fields đã dùng. Không bịa đã nộp nếu ok=false / submitted=false.
+Giải thích theo error nếu có:
+- already_done: hệ thống ghi nhận đã nộp hôm nay (không khẳng định đã mở trình duyệt vừa rồi).
+- need_login / browser_login: mời user đăng nhập trên cửa sổ trình duyệt rồi nhắn lại.
+- no_notes / no_grant / fields_too_short / outside_window / locked / submit_failed / browser_error: nói rõ cần gì tiếp theo, thân thiện.
+- ok + submitted: xác nhận đã điền và nộp, có thể nhắc ngắn nội dung hôm qua/hôm nay nếu có trong fields.
+Không jargon (Redis, job_id, Playwright, force, allow_resubmit). Markdown nhẹ OK.
 Chỉ trả về nội dung tin nhắn, không JSON, không markdown fence."""
 
 
@@ -520,7 +536,7 @@ def compose_hitl_message(
     history_text: str = "",
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """LLM tự viết message hiển thị cho user — không template cứng."""
+    """LLM tự viết message hiển thị cho user — không template if/else."""
     payload = {
         "intent": intent,
         "still_needed": missing,
@@ -528,29 +544,25 @@ def compose_hitl_message(
         "user_message": user_text,
         "chat_history": history_text,
     }
-    reply = llm_text(HITL_MESSAGE_SYSTEM, json.dumps(payload, ensure_ascii=False))
-    text = reply.get("text") or ""
-    if not text:
-        if "browser_login" in missing:
-            text = (
-                "Cửa sổ trình duyệt đang mở trang đăng nhập. "
-                "Bạn đăng nhập giúp mình trên cửa sổ đó, xong nhắn «đã đăng nhập» để mình điền standup tiếp nhé."
-            )
-        elif "email_grant" in missing:
-            text = (
-                "Để mình đọc hộp thư giúp bạn, hãy kết nối Gmail hoặc Outlook "
-                "bằng nút trên màn hình nhé."
-            )
-        elif any(x.startswith("schedule_") for x in missing):
-            text = "Bạn cho mình biết rõ giờ (và thứ/ngày) muốn mình kiểm tra email giúp bạn nhé."
-        elif "yesterday" in missing or "today" in missing:
-            text = (
-                "Đến giờ standup — bạn gửi giúp mình nội dung "
-                "«hôm qua đã làm gì» và «hôm nay sẽ làm gì» nhé."
-            )
-        else:
-            text = "Mình cần thêm một vài thông tin trước khi làm tiếp — bạn bổ sung giúp mình nhé."
-    return reply
+    return llm_text(HITL_MESSAGE_SYSTEM, json.dumps(payload, ensure_ascii=False))
+
+
+def _slim_digest(rows: Any, limit: int = 25) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r in (rows or [])[:limit]:
+        if not isinstance(r, dict):
+            continue
+        out.append(
+            {
+                "from": r.get("from"),
+                "subject": r.get("subject"),
+                "snippet": r.get("snippet"),
+                "date": r.get("date"),
+                "important": bool(r.get("important")),
+                "reason": r.get("reason"),
+            }
+        )
+    return out
 
 
 def compose_email_watch_reply(
@@ -560,28 +572,19 @@ def compose_email_watch_reply(
     history_text: str = "",
     topic: str | None = None,
 ) -> dict[str, Any]:
-    """LLM tổng hợp câu trả lời từ kết quả tool Gmail — không template cứng."""
-    digest = tool_result.get("digest") or []
-    slim = [
-        {
-            "from": r.get("from"),
-            "subject": r.get("subject"),
-            "snippet": r.get("snippet"),
-            "date": r.get("date"),
-            "important": bool(r.get("important")),
-            "reason": r.get("reason"),
-        }
-        for r in digest[:25]
-        if isinstance(r, dict)
-    ]
+    """LLM tổng hợp câu trả lời từ kết quả tool email — không template if/else."""
+    slim = _slim_digest(tool_result.get("digest"))
+    recent = _slim_digest(tool_result.get("recent_digest"))
     payload = {
         "user_message": user_text,
         "chat_history": history_text,
         "topic": topic or tool_result.get("topic"),
         "tool_result": {
             "ok": tool_result.get("ok"),
+            "provider": tool_result.get("provider"),
             "query": tool_result.get("query"),
             "scanned": tool_result.get("scanned"),
+            "topic_match_count": tool_result.get("topic_match_count", len(slim)),
             "important": tool_result.get("important"),
             "already_seen": tool_result.get("already_seen"),
             "error": (
@@ -590,24 +593,42 @@ def compose_email_watch_reply(
                 else None
             ),
             "digest": slim,
+            "recent_digest": recent,
+            "recent_scanned": tool_result.get("recent_scanned"),
         },
     }
-    reply = llm_text(EMAIL_WATCH_REPLY_SYSTEM, json.dumps(payload, ensure_ascii=False))
-    if not reply.get("text"):
-        n = len(slim)
-        important = int(tool_result.get("important") or 0)
-        topic_label = topic or tool_result.get("topic")
-        if topic_label:
-            reply["text"] = (
-                f"Mình đã kiểm tra hộp thư về «{topic_label}»: "
-                f"quét {n} thư, {important} tin đáng chú ý theo bộ lọc."
-            )
-        else:
-            reply["text"] = (
-                f"Mình vừa kiểm tra hộp thư: thấy {n} thư trong khung tìm kiếm"
-                + (f", trong đó {important} tin đáng chú ý." if important else ".")
-            )
-    return reply
+    return llm_text(EMAIL_WATCH_REPLY_SYSTEM, json.dumps(payload, ensure_ascii=False))
+
+
+def compose_standup_reply(
+    *,
+    tool_result: dict[str, Any],
+    user_text: str = "",
+    history_text: str = "",
+    fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """LLM tổng hợp câu trả lời sau khi thử điền standup — không template if/else."""
+    detail = tool_result.get("detail") if isinstance(tool_result.get("detail"), dict) else None
+    payload = {
+        "user_message": user_text,
+        "chat_history": history_text,
+        "fields": {
+            "yesterday": (fields or {}).get("yesterday"),
+            "today": (fields or {}).get("today"),
+            "blockers": (fields or {}).get("blockers"),
+        },
+        "tool_result": {
+            "ok": tool_result.get("ok"),
+            "error": tool_result.get("error"),
+            "need_login": bool(tool_result.get("need_login") or tool_result.get("need_hitl")),
+            "missing_fields": tool_result.get("missing_fields"),
+            "submitted": (detail or tool_result).get("submitted") if detail or tool_result else None,
+            "strategy": (detail or {}).get("strategy") or tool_result.get("strategy"),
+            "url": (detail or {}).get("url") or tool_result.get("url"),
+            "message": tool_result.get("message"),
+        },
+    }
+    return llm_text(STANDUP_REPLY_SYSTEM, json.dumps(payload, ensure_ascii=False))
 
 
 def compose_schedule_confirm(
@@ -634,23 +655,4 @@ def compose_schedule_confirm(
         "watch_summary": (watch_result or {}).get("message"),
         "important": (watch_result or {}).get("important"),
     }
-    reply = llm_text(SCHEDULE_CONFIRM_SYSTEM, json.dumps(payload, ensure_ascii=False))
-    if not reply.get("text"):
-        repeat = state.get("schedule_repeat") or "once"
-        if kind == "standup":
-            suffix = {
-                "daily": " mỗi ngày",
-                "weekly": " mỗi tuần",
-            }.get(str(repeat), "")
-            reply["text"] = (
-                f"Mình đã hẹn điền standup lúc **{when}**{suffix}.\n\n"
-                "- Đến giờ mình sẽ hỏi nội dung **hôm qua / hôm nay** trong chat\n"
-                "- Rồi mới mở trình duyệt điền\n"
-                "- Kết quả báo qua thông báo desktop"
-            )
-        else:
-            reply["text"] = (
-                f"Mình đã hẹn kiểm tra email lúc {when}"
-                + (" mỗi tuần." if repeat == "weekly" else ".")
-            )
-    return reply
+    return llm_text(SCHEDULE_CONFIRM_SYSTEM, json.dumps(payload, ensure_ascii=False))
