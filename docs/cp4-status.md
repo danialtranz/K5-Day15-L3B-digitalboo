@@ -10,7 +10,7 @@
 | `cost/cost-estimate.md` 3 kịch bản + $/task | ✅ simulate-1 · 50 phiên |
 | `spec.md` đủ §0–§9 · impact có nguồn | ✅ |
 | `demo-slides.pdf` thư mục gốc | ✅ |
-| Video demo dự phòng | ✅ `asset/demo-backup.mp4` + link public trong `README.md` (raw GitHub `main`) |
+| Video demo dự phòng | ✅ `asset/demo-backup.mp4` + link public trong `README.md` (raw GitHub `feat/agent`) |
 | *(Bonus)* `validation/log.md` | ❌ chưa làm (≥2 người ngoài nhóm) |
 
 ## Điều kiện cứng (rubric Phần 0)
@@ -32,5 +32,6 @@
 
 ## Việc thủ công còn lại (Giai đoạn 5)
 
-1. Push `feat/agent` + merge/`main` để link raw `main` mở được cửa sổ ẩn danh.
+1. Push `feat/agent` để link raw mở được cửa sổ ẩn danh (đã trỏ README → `feat/agent`).
 2. (Bonus, nếu kịp) ≥2 người ngoài nhóm → `validation/log.md`.
+3. (Tuỳ chọn) Merge `feat/agent` → `main` sau hạn nếu BTC chấm trên `main`.

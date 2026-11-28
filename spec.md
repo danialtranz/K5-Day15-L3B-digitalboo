@@ -177,4 +177,4 @@ Bộ câu thử dưới đây đo **lát cắt eval CP2** (`codebase/`), không 
 | 2026-11-28 CP3 | Đào Reddit N=32 (24/32 pain); mở rộng benchmark 24 câu; nối AI thật + run-1 | Đủ CP3 bằng chứng + eval |
 | 2026-11-28 CP4 | run-2 24/24 (100%); simulate-1 50 phiên; điền cost-estimate | Số thật cho slide đánh giá + chi phí |
 | 2026-11-28 CP4 | Điền README/AI-usage, outline phân công, reflection mẫu, `asset/demo-backup.mp4`, `docs/cp4-status.md` | Khép checklist 4.4; còn upload link video public + nộp form |
-| 2026-11-28 ~20:15 Giai đoạn 5 | Commit `asset/demo-backup.mp4` (bỏ ignore riêng file này); dán link raw GitHub `main` vào README mục 7; người 2 chấm 5 output run-2 trong `eval/README.md`; `validation/log.md` ghi rõ bonus chưa chạy (không bịa) | Khép checklist 5.2–5.3 trước 23:59 |
+| 2026-11-28 ~20:15 Giai đoạn 5 | Commit `asset/demo-backup.mp4` (bỏ ignore riêng file này); dán link raw GitHub `feat/agent` vào README mục 7; người 2 chấm 5 output run-2 trong `eval/README.md`; `validation/log.md` ghi rõ bonus chưa chạy (không bịa) | Khép checklist 5.2–5.3 trước 23:59 |
